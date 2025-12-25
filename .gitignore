@@ -1,0 +1,12 @@
+# Build-Ordner ignorieren (ganz wichtig!)
+build/
+/build/
+
+# VS Code Einstellungen (optional, meistens will man die nicht teilen)
+.vscode/
+
+# Kompilierte Dateien (falls mal was daneben landet)
+*.exe
+*.o
+*.a
+*.dll
