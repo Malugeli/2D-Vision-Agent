@@ -18,5 +18,7 @@ int main() {
 
     cv::waitKey(0);
 
+    std::cout << "King Maher!";
+
     return 0;
 }
