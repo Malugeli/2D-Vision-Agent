@@ -12,14 +12,17 @@
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 
-int wegx = (2899 * 65535) / 3840;
-int wegy = (958 * 65535) / 2160;
+int throwx = (2899 * 65535) / 3840;
+int throwy = (958 * 65535) / 2160;
 void drag(POINT p);
 
 int main()
 {
-    const int width = GetSystemMetrics(SM_CXSCREEN);
-    const int height = GetSystemMetrics(SM_CYSCREEN);
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    HWND game = FindWindow(NULL, "masterduel");
+    RECT rect;
+    GetWindowRect(game, &rect);
+
     wil::com_ptr<ID3D11Device> device;
     wil::com_ptr<ID3D11DeviceContext> context;
     D3D_FEATURE_LEVEL feature;    
@@ -47,6 +50,8 @@ int main()
         std::cout << "Albaz nicht gefunden! ";
         return 1;
     }
+
+
 
     while (true) {
         wil::com_ptr<IDXGIResource> frame;
@@ -122,8 +127,8 @@ void drag(POINT p) {
     SendInput(1, &input, sizeof(input));
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    input.mi.dx = (2899 * 65535) / 3840;
-    input.mi.dy = (958 * 65535) / 2160;
+    input.mi.dx = throwx;
+    input.mi.dy = throwy;
     input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     SendInput(1, &input, sizeof(input));
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
