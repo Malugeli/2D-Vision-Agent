@@ -18,8 +18,8 @@ void drag(POINT p);
 
 int main()
 {
-    const int breite = GetSystemMetrics(SM_CXSCREEN);
-    const int hoehe = GetSystemMetrics(SM_CYSCREEN);
+    const int width = GetSystemMetrics(SM_CXSCREEN);
+    const int height = GetSystemMetrics(SM_CYSCREEN);
     wil::com_ptr<ID3D11Device> device;
     wil::com_ptr<ID3D11DeviceContext> context;
     D3D_FEATURE_LEVEL feature;    

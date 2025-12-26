@@ -25,3 +25,8 @@ add_executable(app main.cpp)
 # WICHTIG: "stdc++exp" entfernen!
 # Das war eine Spezial-Bibliothek für GCC (MinGW). MSVC braucht die nicht.
 target_link_libraries(app PRIVATE ${OpenCV_LIBS} d3d11 dxgi user32 WIL::WIL)
+
+if(MSVC)
+    # /utf-8: Setzt Source- und Execution-Charset auf UTF-8
+    add_compile_options(/utf-8)
+endif()
