@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(OpenCV REQUIRED)
+find_package(wil CONFIG REQUIRED)
 
 # --- DEBUG: Zeig mir, was du gefunden hast! ---
 message(STATUS "DEBUG: OpenCV Include Ordner: ${OpenCV_INCLUDE_DIRS}")
@@ -19,4 +20,4 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 
 add_executable(app main.cpp)
 
-target_link_libraries(app PRIVATE ${OpenCV_LIBS} stdc++exp)
+target_link_libraries(app PRIVATE ${OpenCV_LIBS} stdc++exp d3d11 dxgi user32 WIL::WIL)
