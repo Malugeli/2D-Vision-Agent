@@ -1,157 +1,135 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
-#include <vector>
 #define NOMINMAX
 #include <Windows.h>
+#include "C:\Users\aluge\Desktop\Mahers Headerfiles/unique_hotkey.h"
 #include <d3d11.h>
 #include <dxgi1_2.h>
+#include <wil/com.h>
 #include <opencv2/opencv.hpp>
-#include "unique_hotkey.h"
 
-
-template <typename T>
-struct MiniComPtr {
-    T* ptr = nullptr;
-    MiniComPtr() = default;
-    ~MiniComPtr() { if (ptr) ptr->Release(); }
-    
-    T** operator&() { 
-        if (ptr) { ptr->Release(); ptr = nullptr; }
-        return &ptr; 
-    }
-    
-    T* operator->() { return ptr; }
-    T* get() { return ptr; }
-    
-    operator bool() const { return ptr != nullptr; }
-};
-
-void CheckHR(HRESULT hr, const char* msg) {
-    if (FAILED(hr)) {
-        std::cerr << "FEHLER: " << msg << " (Code: " << std::hex << hr << ")" << std::endl;
-        exit(-1);
-    }
-}
-// -------------------------------------------------------
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
 
 int wegx = (2899 * 65535) / 3840;
 int wegy = (958 * 65535) / 2160;
-
 void drag(POINT p);
 
 int main()
 {
-    // C++23: std::println ist cool, aber std::cout ist stabil
-    std::cout << "Starte Screen Capture..." << std::endl;
-
     const int breite = GetSystemMetrics(SM_CXSCREEN);
     const int hoehe = GetSystemMetrics(SM_CYSCREEN);
-
-    MiniComPtr<ID3D11Device> device;
-    MiniComPtr<ID3D11DeviceContext> context;
+    wil::com_ptr<ID3D11Device> device;
+    wil::com_ptr<ID3D11DeviceContext> context;
     D3D_FEATURE_LEVEL feature;    
 
-    CheckHR(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device, &feature, &context), "CreateDevice");
+    THROW_IF_FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device, &feature, &context));
 
-    MiniComPtr<IDXGIDevice> idxgi;
-    CheckHR(device->QueryInterface(__uuidof(IDXGIDevice), (void**)&idxgi), "Query IDXGIDevice");
+    auto idxgi = device.query<IDXGIDevice>();
 
-    MiniComPtr<IDXGIAdapter> adapter;
-    CheckHR(idxgi->GetAdapter(&adapter), "GetAdapter");
+    wil::com_ptr<IDXGIAdapter> adapter;
+    THROW_IF_FAILED(idxgi->GetAdapter(&adapter));
 
-    MiniComPtr<IDXGIOutput> output;
-    CheckHR(adapter->EnumOutputs(0, &output), "EnumOutputs");
+    wil::com_ptr<IDXGIOutput> output;
+    THROW_IF_FAILED(adapter->EnumOutputs(0, &output));
 
-    MiniComPtr<IDXGIOutput1> output1;
-    CheckHR(output->QueryInterface(__uuidof(IDXGIOutput1), (void**)&output1), "Query Output1");
+    auto output1 = output.query<IDXGIOutput1>();
 
-    MiniComPtr<IDXGIOutputDuplication> dupli;
-    CheckHR(output1->DuplicateOutput(device.get(), &dupli), "DuplicateOutput");
+    wil::com_ptr<IDXGIOutputDuplication> dupli;
+    THROW_IF_FAILED(output1->DuplicateOutput(device.get(), &dupli));
 
-    MiniComPtr<ID3D11Texture2D> cpuframe;
+    wil::com_ptr<ID3D11Texture2D> cpuframe;
     D3D11_TEXTURE2D_DESC desc;
 
-    
     cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/albaz.png");
     if (albaz.empty()) {
-        std::cout << "ACHTUNG: Albaz Bild nicht gefunden! Mache trotzdem weiter..." << std::endl;
-    } else {
-        std::cout << "Albaz Bild geladen." << std::endl;
+        std::cout << "Albaz nicht gefunden! ";
+        return 1;
     }
 
     while (true) {
-        MiniComPtr<IDXGIResource> frame;
+        wil::com_ptr<IDXGIResource> frame;
         DXGI_OUTDUPL_FRAME_INFO frameinfo;
-        
-        // Timeout erhöht auf 500ms, damit es nicht so oft failed
-        HRESULT hr = dupli->AcquireNextFrame(500, &frameinfo, &frame);
-        
-        if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-            continue; 
+        THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
+
+        auto realframe = frame.query<ID3D11Texture2D>();
+
+        if(!cpuframe)
+        {
+            realframe->GetDesc(&desc);
+            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            desc.Usage = D3D11_USAGE_STAGING;
+            desc.BindFlags = 0;
+            desc.MiscFlags = 0;
+            THROW_IF_FAILED(device->CreateTexture2D(&desc, nullptr, &cpuframe));
         }
-        if (FAILED(hr)) {
+
+        context->CopyResource(cpuframe.get(), realframe.get());
+
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        context->Map(cpuframe.get(), 0, D3D11_MAP_READ, 0, &mapped);
+
+        {
+            // Scope für Mat, damit wir sicher sind, wann wir auf die Daten zugreifen
+            cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
+
+            cv::Mat screenshotBGR;
+            // Konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zu 'albaz' passt
+            cv::cvtColor(screenshotBGRA, screenshotBGR, cv::COLOR_BGRA2BGR);
+
+            // Jetzt sind beide BGR -> matchTemplate funktioniert
+            cv::Mat result;
+            cv::matchTemplate(screenshotBGR, albaz, result, cv::TM_CCOEFF_NORMED);
+
+            double minVal;
+            double maxVal;
+            cv::Point p;
+            cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
             
-            std::cout << "Fehler beim Frame holen. Versuche Reset..." << std::endl;
-            dupli->ReleaseFrame();
-            continue; 
-        }
 
-        MiniComPtr<ID3D11Texture2D> realframe;
-        hr = frame->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&realframe);
-        
-        if (SUCCEEDED(hr)) {
-            if(!cpuframe)
-            {
-                realframe->GetDesc(&desc);
-                desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-                desc.Usage = D3D11_USAGE_STAGING;
-                desc.BindFlags = 0;
-                desc.MiscFlags = 0;
-                device->CreateTexture2D(&desc, nullptr, &cpuframe);
-            }
-
-            context->CopyResource(cpuframe.get(), realframe.get());
-
-            D3D11_MAPPED_SUBRESOURCE mapped;
-            hr = context->Map(cpuframe.get(), 0, D3D11_MAP_READ, 0, &mapped);
-
-            if (SUCCEEDED(hr)) {
-                // Bildverarbeitung
-                cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
-                
-                
-                if (!albaz.empty()) {
-                    cv::Mat screenshotBGR;
-                    cv::cvtColor(screenshotBGRA, screenshotBGR, cv::COLOR_BGRA2BGR);
-
-                    cv::Mat result;
-                    cv::matchTemplate(screenshotBGR, albaz, result, cv::TM_CCOEFF_NORMED);
-
-                    double minVal, maxVal;
-                    cv::Point p;
-                    cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
-
-                    if (maxVal > 0.8) { 
-                        std::cout << "Gefunden! Score: " << maxVal << std::endl;
-                        
-                    }
-                }
-
-                context->Unmap(cpuframe.get(), 0);
+            if (maxVal > 0.8) {
+                std::cout << "Gefunden! King Maher! ";
+                POINT y;
+                y.x = ((p.x + (albaz.cols / 2)) * 65535) / 3840;
+                y.y = ((p.y + (albaz.rows / 2)) * 65535) / 2160;
+                drag(y);
             }
         }
 
+
+
+
+        context->Unmap(cpuframe.get(), 0);
         dupli->ReleaseFrame(); 
-        
-        
-        if (GetAsyncKeyState(VK_ESCAPE)) break; 
     }
-    
-    return 0;
 }
 
+
 void drag(POINT p) {
-    // Deine Drag Funktion (unveraendert lassen)
-    // ...
+    INPUT input{
+        .type = INPUT_MOUSE,
+        .mi = {
+            .dx = p.x,
+            .dy = p.y,
+            .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+            }
+    };
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    input.mi.dx = (2899 * 65535) / 3840;
+    input.mi.dy = (958 * 65535) / 2160;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
 }
