@@ -9,12 +9,9 @@
 #include <wil/com.h>
 #include <opencv2/opencv.hpp>
 
-#pragma comment(lib, "d3d11.lib")
-#pragma comment(lib, "dxgi.lib")
-
 int throwx = (2899 * 65535) / 3840;
 int throwy = (958 * 65535) / 2160;
-void drag(POINT p);
+void drag(INPUT input, POINT p);
 
 int main()
 {
@@ -22,6 +19,9 @@ int main()
     HWND game = FindWindow(NULL, "masterduel");
     RECT rect;
     GetWindowRect(game, &rect);
+    int height = rect.bottom - rect.top;
+    int width = rect.right - rect.left;
+    cv::Rect maher(rect.left, rect.top, width, height);
 
     wil::com_ptr<ID3D11Device> device;
     wil::com_ptr<ID3D11DeviceContext> context;
@@ -51,6 +51,14 @@ int main()
         return 1;
     }
 
+    INPUT input{
+        .type = INPUT_MOUSE,
+        .mi = {
+            .dx = 0,
+            .dy = 0,
+            .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+            }
+    };
 
 
     while (true) {
@@ -69,7 +77,7 @@ int main()
             desc.MiscFlags = 0;
             THROW_IF_FAILED(device->CreateTexture2D(&desc, nullptr, &cpuframe));
         }
-
+        
         context->CopyResource(cpuframe.get(), realframe.get());
 
         D3D11_MAPPED_SUBRESOURCE mapped;
@@ -85,7 +93,7 @@ int main()
 
             // Jetzt sind beide BGR -> matchTemplate funktioniert
             cv::Mat result;
-            cv::matchTemplate(screenshotBGR, albaz, result, cv::TM_CCOEFF_NORMED);
+            cv::matchTemplate(screenshotBGR(maher), albaz, result, cv::TM_CCOEFF_NORMED);
 
             double minVal;
             double maxVal;
@@ -96,9 +104,9 @@ int main()
             if (maxVal > 0.8) {
                 std::cout << "Gefunden! King Maher! ";
                 POINT y;
-                y.x = ((p.x + (albaz.cols / 2)) * 65535) / 3840;
-                y.y = ((p.y + (albaz.rows / 2)) * 65535) / 2160;
-                drag(y);
+                y.x = (((p.x + rect.left) + (albaz.cols / 2)) * 65535) / 3840;
+                y.y = (((p.y + rect.top) + (albaz.rows / 2)) * 65535) / 2160;
+                drag(input, y);
             }
         }
 
@@ -111,15 +119,10 @@ int main()
 }
 
 
-void drag(POINT p) {
-    INPUT input{
-        .type = INPUT_MOUSE,
-        .mi = {
-            .dx = p.x,
-            .dy = p.y,
-            .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
-            }
-    };
+void drag(INPUT input, POINT p) {
+
+    input.mi.dx = p.x,
+    input.mi.dy = p.y,
     SendInput(1, &input, sizeof(input));
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
@@ -127,8 +130,8 @@ void drag(POINT p) {
     SendInput(1, &input, sizeof(input));
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    input.mi.dx = throwx;
-    input.mi.dy = throwy;
+    input.mi.dx = input.mi.dx * 1.3;
+    //input.mi.dy = throwy;
     input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     SendInput(1, &input, sizeof(input));
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
