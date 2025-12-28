@@ -11,7 +11,8 @@
 
 int throwx = (2899 * 65535) / 3840;
 int throwy = (958 * 65535) / 2160;
-void drag(INPUT input, POINT p);
+void drag(INPUT& input, POINT p);
+int normalize(int coordinates, int maxDimension);
 
 int main()
 {
@@ -52,12 +53,7 @@ int main()
     }
 
     INPUT input{
-        .type = INPUT_MOUSE,
-        .mi = {
-            .dx = 0,
-            .dy = 0,
-            .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
-            }
+        .type = INPUT_MOUSE
     };
 
 
@@ -104,25 +100,22 @@ int main()
             if (maxVal > 0.8) {
                 std::cout << "Gefunden! King Maher! ";
                 POINT y;
-                y.x = (((p.x + rect.left) + (albaz.cols / 2)) * 65535) / 3840;
-                y.y = (((p.y + rect.top) + (albaz.rows / 2)) * 65535) / 2160;
+                y.x = normalize(p.x + rect.left + (albaz.cols / 2), desc.Width);
+                y.y = normalize(((p.y + rect.top) + (albaz.rows / 2)), desc.Height);
                 drag(input, y);
             }
         }
-
-
-
-
         context->Unmap(cpuframe.get(), 0);
         dupli->ReleaseFrame(); 
     }
 }
 
 
-void drag(INPUT input, POINT p) {
+void drag(INPUT& input, POINT p) {
 
     input.mi.dx = p.x,
     input.mi.dy = p.y,
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     SendInput(1, &input, sizeof(input));
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
@@ -140,4 +133,8 @@ void drag(INPUT input, POINT p) {
     SendInput(1, &input, sizeof(input));
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
+}
+
+int normalize(int coordinates, int maxDimension){
+    return (coordinates * 65535) / maxDimension;
 }
