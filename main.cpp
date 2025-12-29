@@ -8,11 +8,12 @@
 #include <dxgi1_2.h>
 #include <wil/com.h>
 #include <opencv2/opencv.hpp>
+#include <string>
 
-int throwx = (2899 * 65535) / 3840;
-int throwy = (958 * 65535) / 2160;
 void drag(INPUT& input, POINT p);
 int normalize(int coordinates, int maxDimension);
+void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int targetY, int maxHeight);
+std::string foa = "Fallen of Albaz";
 
 int main()
 {
@@ -51,11 +52,17 @@ int main()
         std::cout << "Albaz nicht gefunden! ";
         return 1;
     }
+    cv::Mat albazklein = cv::imread("C:/Users/aluge/Desktop/albazklein.png");
+        if (albaz.empty()) {
+        std::cout << "Albaz nicht gefunden! ";
+        return 1;
+    }
 
-    INPUT input{
-        .type = INPUT_MOUSE
-    };
-
+    INPUT input{};    
+    input.type = INPUT_MOUSE;
+    
+    INPUT inputk{};
+    inputk.type = INPUT_KEYBOARD;
 
     while (true) {
         wil::com_ptr<IDXGIResource> frame;
@@ -104,6 +111,13 @@ int main()
                 y.y = normalize(((p.y + rect.top) + (albaz.rows / 2)), desc.Height);
                 drag(input, y);
             }
+            else{
+                //nutz cv::Mat den result von matchTemplate als Argument, diesmal nicht albaz sondern kleinalbaz.
+                getAlbaz(input, inputk, (rect.left + (width * 0.7)), desc.Width, (rect.top + (height * 0.2)), desc.Height);
+                std::cout << "not found";
+                break;
+                
+            }
         }
         context->Unmap(cpuframe.get(), 0);
         dupli->ReleaseFrame(); 
@@ -137,4 +151,53 @@ void drag(INPUT& input, POINT p) {
 
 int normalize(int coordinates, int maxDimension){
     return (coordinates * 65535) / maxDimension;
+}
+
+void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int targetY, int maxHeight){
+    //geh hin
+    input.mi.dx = normalize(targetX, maxWidth),
+    input.mi.dy = normalize(targetY, maxHeight),
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    //klick
+    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    //klick go
+    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    //------------------------------------------------------------------------
+
+    for(char c : foa){
+        //TASTATURBEGINN
+        BYTE virtualKey = VkKeyScan(c);
+        inputk.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
+        
+        // WICHTIG FÜR GAMES: Wir nutzen Scan Codes, nicht Virtual Keys
+        inputk.ki.dwFlags = KEYEVENTF_SCANCODE; // Drücken (Key Down)
+
+        // --- KEY DOWN ---
+        SendInput(1, &inputk, sizeof(INPUT));
+
+        // Kurze Pause, damit das Spiel den "Press" registriert (1-2 Frames)
+        // Ohne Sleep ist es oft zu schnell für die Game-Engine
+        std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+
+        // --- KEY UP ---
+        inputk.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP; // Loslassen
+        SendInput(1, &inputk, sizeof(INPUT));
+        
+   }
+   std::this_thread::sleep_for(std::chrono::milliseconds(50));
+   inputk.ki.wScan = MapVirtualKey(VK_RETURN, MAPVK_VK_TO_VSC);
+   inputk.ki.dwFlags = KEYEVENTF_SCANCODE;
+   SendInput(1, &inputk, sizeof(INPUT));
+   std::this_thread::sleep_for(std::chrono::milliseconds(50));
+   inputk.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP; // Loslassen
+   SendInput(1, &inputk, sizeof(INPUT));
 }
