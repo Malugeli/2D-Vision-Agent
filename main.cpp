@@ -12,7 +12,7 @@
 
 void drag(INPUT& input, POINT p);
 int normalize(int coordinates, int maxDimension);
-void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int targetY, int maxHeight);
+void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int targetY, int maxHeight, cv::Mat albazklein, cv::Mat screenshotBGR);
 std::string foa = "Fallen of Albaz";
 
 int main()
@@ -53,8 +53,8 @@ int main()
         return 1;
     }
     cv::Mat albazklein = cv::imread("C:/Users/aluge/Desktop/albazklein.png");
-        if (albaz.empty()) {
-        std::cout << "Albaz nicht gefunden! ";
+        if (albazklein.empty()) {
+        std::cout << "Albazklein nicht gefunden! ";
         return 1;
     }
 
@@ -113,10 +113,8 @@ int main()
             }
             else{
                 //nutz cv::Mat den result von matchTemplate als Argument, diesmal nicht albaz sondern kleinalbaz.
-                getAlbaz(input, inputk, (rect.left + (width * 0.7)), desc.Width, (rect.top + (height * 0.2)), desc.Height);
-                std::cout << "not found";
+                getAlbaz(input, inputk, (rect.left + (width * 0.74)), desc.Width, (rect.top + (height * 0.2)), desc.Height, albazklein, screenshotBGR);
                 break;
-                
             }
         }
         context->Unmap(cpuframe.get(), 0);
@@ -153,7 +151,7 @@ int normalize(int coordinates, int maxDimension){
     return (coordinates * 65535) / maxDimension;
 }
 
-void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int targetY, int maxHeight){
+void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int targetY, int maxHeight, cv::Mat albazklein, cv::Mat screenshotBGR){
     //geh hin
     input.mi.dx = normalize(targetX, maxWidth),
     input.mi.dy = normalize(targetY, maxHeight),
@@ -200,4 +198,37 @@ void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int target
    std::this_thread::sleep_for(std::chrono::milliseconds(50));
    inputk.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP; // Loslassen
    SendInput(1, &inputk, sizeof(INPUT));
+   std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+
+   input.mi.dx = input.mi.dx * 1.222;
+   input.mi.dy = input.mi.dy * 1.5;
+   input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+   SendInput(1, &input, sizeof(input));
+
+   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+   input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+   SendInput(1, &input, sizeof(input));
+
+   std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+   input.mi.dy = input.mi.dy * 1.3;
+   input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+   SendInput(1, &input, sizeof(input));
+
+   std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+   input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+   SendInput(1, &input, sizeof(input));
+
+   cv::Mat result;
+   cv::matchTemplate(screenshotBGR, albazklein, result, cv::TM_CCOEFF_NORMED);
+   
+   double minVal;
+   double maxVal;
+   cv::Point p;
+   cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
+
+
 }
