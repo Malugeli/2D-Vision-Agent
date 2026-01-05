@@ -9,21 +9,31 @@
 #include <wil/com.h>
 #include <opencv2/opencv.hpp>
 #include <string>
+#include "faktor.h"
 
-void drag(INPUT& input, POINT p);
+void drag(POINT startcord, POINT targetcord);
 int normalize(int coordinates, int maxDimension);
-void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int targetY, int maxHeight, cv::Mat albazklein, cv::Mat screenshotBGR);
+void getAlbaz(int targetX, int maxWidth, int targetY, int maxHeight, cv::Mat albazklein, cv::Mat screenshotBGR);
 std::string foa = "Fallen of Albaz";
+INPUT input{};    
+INPUT inputk{};
+POINT start{};
+POINT goal{};
 
 int main()
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     HWND game = FindWindow(NULL, "masterduel");
+    input.type = INPUT_MOUSE; //ist hässlich idk ob ich das hier so lasse
+    inputk.type = INPUT_KEYBOARD; //same
     RECT rect;
+    RECT crect;
     GetWindowRect(game, &rect);
+    GetClientRect(game, &crect);
     int height = rect.bottom - rect.top;
     int width = rect.right - rect.left;
     cv::Rect maher(rect.left, rect.top, width, height);
+    UI[std::to_underlying(UiTarget::out)].x;
 
     wil::com_ptr<ID3D11Device> device;
     wil::com_ptr<ID3D11DeviceContext> context;
@@ -57,12 +67,6 @@ int main()
         std::cout << "Albazklein nicht gefunden! ";
         return 1;
     }
-
-    INPUT input{};    
-    input.type = INPUT_MOUSE;
-    
-    INPUT inputk{};
-    inputk.type = INPUT_KEYBOARD;
 
     while (true) {
         wil::com_ptr<IDXGIResource> frame;
@@ -106,15 +110,13 @@ int main()
 
             if (maxVal > 0.8) {
                 std::cout << "Gefunden! King Maher! ";
-                POINT y;
-                y.x = normalize(p.x + rect.left + (albaz.cols / 2), desc.Width);
-                y.y = normalize(((p.y + rect.top) + (albaz.rows / 2)), desc.Height);
-                drag(input, y);
-            }
-            else{
-                //nutz cv::Mat den result von matchTemplate als Argument, diesmal nicht albaz sondern kleinalbaz.
-                getAlbaz(input, inputk, (rect.left + (width * 0.74)), desc.Width, (rect.top + (height * 0.2)), desc.Height, albazklein, screenshotBGR);
-                break;
+                start.x = normalize(p.x + rect.left + (albaz.cols / 2), desc.Width);
+                start.y = normalize(((p.y + rect.top) + (albaz.rows / 2)), desc.Height);
+                goal = get_cords(UiTarget::out, crect.right, crect.bottom);
+                ClientToScreen(game, &goal);
+                goal.x = normalize(goal.x, desc.Width);
+                goal.y = normalize(goal.y, desc.Height);
+                drag(start, goal);
             }
         }
         context->Unmap(cpuframe.get(), 0);
@@ -123,35 +125,11 @@ int main()
 }
 
 
-void drag(INPUT& input, POINT p) {
-
-    input.mi.dx = p.x,
-    input.mi.dy = p.y,
-    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-    input.mi.dx = input.mi.dx * 1.3;
-    //input.mi.dy = throwy;
-    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-}
-
 int normalize(int coordinates, int maxDimension){
     return (coordinates * 65535) / maxDimension;
 }
 
-void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int targetY, int maxHeight, cv::Mat albazklein, cv::Mat screenshotBGR){
+void getAlbaz(int targetX, int maxWidth, int targetY, int maxHeight, cv::Mat albazklein, cv::Mat screenshotBGR){
     //geh hin
     input.mi.dx = normalize(targetX, maxWidth),
     input.mi.dy = normalize(targetY, maxHeight),
@@ -201,7 +179,7 @@ void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int target
    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
 
-   input.mi.dx = input.mi.dx * 1.222;
+   input.mi.dx = input.mi.dx * 1.23;
    input.mi.dy = input.mi.dy * 1.5;
    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
    SendInput(1, &input, sizeof(input));
@@ -229,6 +207,46 @@ void getAlbaz(INPUT& input, INPUT& inputk, int targetX, int maxWidth, int target
    double maxVal;
    cv::Point p;
    cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
-
-
 }
+
+void drag(POINT startcord, POINT targetcord){
+    input.mi.dx = startcord.x,
+    input.mi.dy = startcord.y,
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    input.mi.dx = targetcord.x;
+    input.mi.dy = targetcord.y;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+}
+
+void click(POINT p){ //ich geh aus das die Werte bereits normalized sind
+    input.mi.dx = p.x,
+    input.mi.dy = p.y,
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    //klick
+    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    //klick go
+    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+}
+
+//UI[std::to_underlying(UiTarget::out)] * rect.right = Pixel in Clientside -> wir müssen jetzt ClientToScreen machen. ClientToScreen erwartet aber POINT sprich wir müssen vorher die 
