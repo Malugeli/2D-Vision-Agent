@@ -13,13 +13,9 @@
 
 void drag(POINT startcord, POINT targetcord);
 void click(POINT p);
-//int normalize(int coordinates, int maxDimension);
-void getAlbaz(int targetX, int maxWidth, int targetY, int maxHeight, cv::Mat albazklein, cv::Mat screenshotBGR);
 std::string foa = "Fallen of Albaz";
 INPUT input{};    
 INPUT inputk{};
-POINT start{};
-POINT goal{};
 
 struct ClientSide{// bisher sind wir nicht dynamisch. Wenn User bei Laufzeit die Resolution ändert ist ClientRect falsch.
     HWND game;
@@ -30,26 +26,74 @@ struct ClientSide{// bisher sind wir nicht dynamisch. Wenn User bei Laufzeit die
     ClientSide() = default;
     ClientSide(HWND input) : game(input != NULL ? input : nullptr){
         GetClientRect(game, &ClientRect);
-        // width = GetSystemMetrics(SM_CXSCREEN); Daten stimmen nicht, alte Funktion wir hardcoden die zahlen fürs erste
-        // height = GetSystemMetrics(SM_CYSCREEN);
     }
     
+    POINT normalize(POINT p){ // Konvertiert P zu SendInput fähigen Zahlen
+        p.x = std::lround((p.x * 65535.0) / width);
+        p.y = std::lround((p.y * 65535.0) / height);
+        return p;
+    }
+
     POINT convert_coordinates(POINT p){ // Konvertiert ClientToScreenPixel zu ScreenPixel und normalisiert für SendInput (ich empfehle die Funktion nur als Argument für SendInput zu nutzen da User Fenster ansonsten bewegen kann und Daten outdated werden)
         ClientToScreen(game, &p);
         return normalize(p);       
     }
+
 
     POINT get_UI_coordinates(UiTarget target){ // gib nur das UI ein und du erhältst SendInput Ready Koordinaten
         POINT p;
         p.x = std::lround(ClientRect.right * UI[std::to_underlying(target)].x);
         p.y = std::lround(ClientRect.bottom * UI[std::to_underlying(target)].y);
         return convert_coordinates(p);
+    }
+};
+
+struct bot{
+    INPUT inputM;
+    INPUT inputK;
+    
+    void drag(POINT startcord, POINT targetcord){
+    input.mi.dx = startcord.x,
+    input.mi.dy = startcord.y,
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    input.mi.dx = targetcord.x;
+    input.mi.dy = targetcord.y;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    SendInput(1, &input, sizeof(input));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
-    POINT normalize(POINT p){
-    return {(p.x * 65535) / width, (p.y *65535) / height};
-}    
-};
+    void click(POINT p){ //ich geh aus das die Werte bereits normalized sind
+        input.mi.dx = p.x,
+        input.mi.dy = p.y,
+        input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+        SendInput(1, &input, sizeof(input));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+        //klick
+        input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        SendInput(1, &input, sizeof(input));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+        //klick go
+        input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        SendInput(1, &input, sizeof(input));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+}
+
+}
+
 
 //am ende des Tages wirds wahrscheinlich mindestens 2 Klassen geben 1. die ClientSide von Game und Koordinatenberechnung und 2. Der Bot selbst.
 int main()
