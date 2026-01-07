@@ -12,6 +12,7 @@
 #include "faktor.h"
 
 void drag(POINT startcord, POINT targetcord);
+void click(POINT p);
 int normalize(int coordinates, int maxDimension);
 void getAlbaz(int targetX, int maxWidth, int targetY, int maxHeight, cv::Mat albazklein, cv::Mat screenshotBGR);
 std::string foa = "Fallen of Albaz";
@@ -20,6 +21,37 @@ INPUT inputk{};
 POINT start{};
 POINT goal{};
 
+struct ClientSide{// bisher sind wir nicht dynamisch. Wenn User bei Laufzeit die Resolution ändert ist ClientRect falsch.
+    HWND game;
+    RECT ClientRect;
+    int width;
+    int height;
+
+    ClientSide() = default;
+    ClientSide(HWND input) : game(input != NULL ? input : nullptr){
+        GetClientRect(game, &ClientRect);
+        width = GetSystemMetrics(SM_CXSCREEN);
+        height = GetSystemMetrics(SM_CYSCREEN);
+    }
+    
+    POINT convert_coordinates(POINT p){ // Konvertiert ClientToScreenPixel zu ScreenPixel und normalisiert für SendInput (ich empfehle die Funktion nur als Argument für SendInput zu nutzen da User Fenster ansonsten bewegen kann und Daten outdated werden)
+        ClientToScreen(game, &p);
+        p.x = normalize(p.x, width);
+        p.y = normalize(p.y, height);        
+    }
+
+    POINT get_UI_coordinates(UiTarget target){ // gib nur das UI ein und du erhältst SendInput Ready Koordinaten
+        POINT p;
+        p.x = normalize(std::lround(ClientRect.right * UI[std::to_underlying(target)].x), width);
+        p.y = normalize(std::lround(ClientRect.bottom * UI[std::to_underlying(target)].y), height);
+}
+
+
+    
+    
+};
+
+//am ende des Tages wirds wahrscheinlich mindestens 2 Klassen geben 1. die ClientSide von Game und Koordinatenberechnung und 2. Der Bot selbst.
 int main()
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -27,9 +59,7 @@ int main()
     input.type = INPUT_MOUSE; //ist hässlich idk ob ich das hier so lasse
     inputk.type = INPUT_KEYBOARD; //same
     RECT rect;
-    RECT crect;
     GetWindowRect(game, &rect);
-    GetClientRect(game, &crect);
     int height = rect.bottom - rect.top;
     int width = rect.right - rect.left;
     cv::Rect maher(rect.left, rect.top, width, height);
@@ -48,7 +78,7 @@ int main()
 
     wil::com_ptr<IDXGIOutput> output;
     THROW_IF_FAILED(adapter->EnumOutputs(0, &output));
-
+    
     auto output1 = output.query<IDXGIOutput1>();
 
     wil::com_ptr<IDXGIOutputDuplication> dupli;
@@ -109,14 +139,15 @@ int main()
             
 
             if (maxVal > 0.8) {
-                std::cout << "Gefunden! King Maher! ";
-                start.x = normalize(p.x + rect.left + (albaz.cols / 2), desc.Width);
-                start.y = normalize(((p.y + rect.top) + (albaz.rows / 2)), desc.Height);
-                goal = get_cords(UiTarget::out, crect.right, crect.bottom);
+                // std::cout << "Gefunden! King Maher! ";
+                // start.x = normalize(p.x + rect.left + (albaz.cols / 2), desc.Width);
+                // start.y = normalize(((p.y + rect.top) + (albaz.rows / 2)), desc.Height);
+                // goal = get_cords(UiTarget::searchbar, crect.right, crect.bottom);
                 ClientToScreen(game, &goal);
                 goal.x = normalize(goal.x, desc.Width);
                 goal.y = normalize(goal.y, desc.Height);
-                drag(start, goal);
+                //drag(start, goal);
+                click(goal);
             }
         }
         context->Unmap(cpuframe.get(), 0);
@@ -249,4 +280,3 @@ void click(POINT p){ //ich geh aus das die Werte bereits normalized sind
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 }
 
-//UI[std::to_underlying(UiTarget::out)] * rect.right = Pixel in Clientside -> wir müssen jetzt ClientToScreen machen. ClientToScreen erwartet aber POINT sprich wir müssen vorher die 
