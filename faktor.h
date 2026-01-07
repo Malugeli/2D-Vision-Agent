@@ -28,11 +28,6 @@ constexpr std::array<Faktorisierung, std::to_underlying(UiTarget::COUNT)> UI{{
 
 }};
 
-inline POINT get_cords(UiTarget target, long width, long height){ //länge und breite von Client
-    return {std::lround(width * UI[std::to_underlying(target)].x),
-    std::lround(height * UI[std::to_underlying(target)].y)};
-}
-
 // Warte, wenn ClientSide immer gleich ist, warum schreibe ich nur die Faktorisierung und Clientside? Warum Hardcode ich nicht schon vorher die Clientsidepixel und das einzige 
 // was ich dann in meinem Programn tun muss ist die ClientToScreen
 // Sprich ich hab sagen wir 3 Tabellen, jeweils für 4k, 2k und full hd. Alles schon berechnet und es gibt 100% ein if irgendwas dann lade diese 

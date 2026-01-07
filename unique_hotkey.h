@@ -37,7 +37,6 @@ struct unique_hotkey {
 	unique_hotkey(unique_hotkey&& other) noexcept : window(std::exchange(other.window, nullptr)), id(std::exchange(other.id, 0)), modifier(std::exchange(other.modifier, 0u)), vk(std::exchange(other.vk, 0u)) {
 	}
 	unique_hotkey& operator=(unique_hotkey&& other) noexcept {
-
 		reset();
 		window = std::exchange(other.window, nullptr);
 		id = std::exchange(other.id, 0);
