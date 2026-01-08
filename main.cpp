@@ -13,7 +13,6 @@
 
 void drag(POINT startcord, POINT targetcord);
 void click(POINT p);
-std::string foa = "Fallen of Albaz";
 INPUT input{};    
 INPUT inputk{};
 
@@ -48,10 +47,12 @@ struct ClientSide{// bisher sind wir nicht dynamisch. Wenn User bei Laufzeit die
     }
 };
 
-struct bot{
+struct bot{// übergib bereits normalisierte Werte für SendInput
     INPUT inputM;
     INPUT inputK;
-    
+
+    //Maus
+
     void drag(POINT startcord, POINT targetcord){
     input.mi.dx = startcord.x,
     input.mi.dy = startcord.y,
@@ -74,25 +75,42 @@ struct bot{
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
-    void click(POINT p){ //ich geh aus das die Werte bereits normalized sind
+    void click(POINT p){
         input.mi.dx = p.x,
         input.mi.dy = p.y,
         input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
         SendInput(1, &input, sizeof(input));
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-        //klick
         input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
         SendInput(1, &input, sizeof(input));
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-        //klick go
         input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
         SendInput(1, &input, sizeof(input));
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 }
 
+    //Tastatur
+    void type_string(std::string_view s){
+            for(char c : s){
+
+        BYTE virtualKey = VkKeyScan(c);
+        inputk.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
+        
+        // WICHTIG FÜR GAMES: Wir nutzen Scan Codes, nicht Virtual Keys
+        inputk.ki.dwFlags = KEYEVENTF_SCANCODE; // Drücken (Key Down)
+
+        // --- KEY DOWN ---
+        SendInput(1, &inputk, sizeof(INPUT));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+
+        // --- KEY UP ---
+        inputk.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP; // Loslassen
+        SendInput(1, &inputk, sizeof(INPUT));
+   }
 }
+};
 
 
 //am ende des Tages wirds wahrscheinlich mindestens 2 Klassen geben 1. die ClientSide von Game und Koordinatenberechnung und 2. Der Bot selbst.
@@ -198,126 +216,3 @@ int main()
         dupli->ReleaseFrame(); 
     }
 }
-
-
-
-// void getAlbaz(int targetX, int maxWidth, int targetY, int maxHeight, cv::Mat albazklein, cv::Mat screenshotBGR){
-//     //geh hin
-//     input.mi.dx = normalize(targetX, maxWidth),
-//     input.mi.dy = normalize(targetY, maxHeight),
-//     input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-//     SendInput(1, &input, sizeof(input));
-//     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-//     //klick
-//     input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-//     SendInput(1, &input, sizeof(input));
-//     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-//     //klick go
-//     input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-//     SendInput(1, &input, sizeof(input));
-//     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-//     //------------------------------------------------------------------------
-
-//     for(char c : foa){
-//         //TASTATURBEGINN
-//         BYTE virtualKey = VkKeyScan(c);
-//         inputk.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
-        
-//         // WICHTIG FÜR GAMES: Wir nutzen Scan Codes, nicht Virtual Keys
-//         inputk.ki.dwFlags = KEYEVENTF_SCANCODE; // Drücken (Key Down)
-
-//         // --- KEY DOWN ---
-//         SendInput(1, &inputk, sizeof(INPUT));
-
-//         // Kurze Pause, damit das Spiel den "Press" registriert (1-2 Frames)
-//         // Ohne Sleep ist es oft zu schnell für die Game-Engine
-//         std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
-
-//         // --- KEY UP ---
-//         inputk.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP; // Loslassen
-//         SendInput(1, &inputk, sizeof(INPUT));
-        
-//    }
-//    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-//    inputk.ki.wScan = MapVirtualKey(VK_RETURN, MAPVK_VK_TO_VSC);
-//    inputk.ki.dwFlags = KEYEVENTF_SCANCODE;
-//    SendInput(1, &inputk, sizeof(INPUT));
-//    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-//    inputk.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP; // Loslassen
-//    SendInput(1, &inputk, sizeof(INPUT));
-//    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-
-//    input.mi.dx = input.mi.dx * 1.23;
-//    input.mi.dy = input.mi.dy * 1.5;
-//    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-//    SendInput(1, &input, sizeof(input));
-
-//    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
-//    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-//    SendInput(1, &input, sizeof(input));
-
-//    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-//    input.mi.dy = input.mi.dy * 1.3;
-//    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-//    SendInput(1, &input, sizeof(input));
-
-//    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-//    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-//    SendInput(1, &input, sizeof(input));
-
-//    cv::Mat result;
-//    cv::matchTemplate(screenshotBGR, albazklein, result, cv::TM_CCOEFF_NORMED);
-   
-//    double minVal;
-//    double maxVal;
-//    cv::Point p;
-//    cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
-// }
-
-void drag(POINT startcord, POINT targetcord){
-    input.mi.dx = startcord.x,
-    input.mi.dy = startcord.y,
-    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-
-    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-
-    input.mi.dx = targetcord.x;
-    input.mi.dy = targetcord.y;
-    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-
-    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-}
-
-void click(POINT p){ //ich geh aus das die Werte bereits normalized sind
-    input.mi.dx = p.x,
-    input.mi.dy = p.y,
-    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-    //klick
-    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-    //klick go
-    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-    SendInput(1, &input, sizeof(input));
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-}
-
