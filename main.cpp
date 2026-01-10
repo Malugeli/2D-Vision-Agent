@@ -90,24 +90,56 @@ struct bot{// übergib bereits normalisierte Werte für SendInput
         SendInput(1, &input, sizeof(input));
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 }
+    
+// --------------------------------------------------------------------------------------------------------------------------
+    // --------------------------------------------------------------------------------------------------------------------------
 
     //Tastatur
     void type_string(std::string_view s){
             for(char c : s){
+                SHORT checkKey = VkKeyScan(c);
+                if(checkKey & (1 >> 8)){
+                    // Erstmal Shift drücken
+                    inputk.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
+                    inputk.ki.dwFlags = KEYEVENTF_SCANCODE;
+                    SendInput(1, &inputk, sizeof(INPUT));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
 
-        BYTE virtualKey = VkKeyScan(c);
-        inputk.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
-        
-        // WICHTIG FÜR GAMES: Wir nutzen Scan Codes, nicht Virtual Keys
-        inputk.ki.dwFlags = KEYEVENTF_SCANCODE; // Drücken (Key Down)
+                    // Jetzt Buchstabe
+                    BYTE virtualKey = VkKeyScan(c); // statt nochmal Funktionsaufruf kann ich Bitshiften und nur die untersten 8 Bits hier laden.
+                    inputk.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
+                    inputk.ki.dwFlags = KEYEVENTF_SCANCODE;
+                    SendInput(1, &inputk, sizeof(INPUT));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
 
-        // --- KEY DOWN ---
-        SendInput(1, &inputk, sizeof(INPUT));
-        std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+                    // Buchstabe Loslassen
+                    inputk.ki.dwFlags = KEYEVENTF_KEYUP;
+                    SendInput(1, &inputk, sizeof(INPUT));   
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
 
-        // --- KEY UP ---
-        inputk.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP; // Loslassen
-        SendInput(1, &inputk, sizeof(INPUT));
+                    // dann Shift loslassen
+                    inputk.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
+                    inputk.ki.dwFlags = KEYEVENTF_KEYUP;
+                    SendInput(1, &inputk, sizeof(INPUT));   
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+                }
+                else
+                {               
+                    BYTE virtualKey = VkKeyScan(c);
+                    inputk.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
+                    
+                    // WICHTIG FÜR GAMES: Wir nutzen Scan Codes, nicht Virtual Keys
+                    inputk.ki.dwFlags = KEYEVENTF_SCANCODE; // Drücken (Key Down)
+
+                    // --- KEY DOWN ---
+                    SendInput(1, &inputk, sizeof(INPUT));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+
+                    // --- KEY UP ---
+                    inputk.ki.dwFlags = KEYEVENTF_KEYUP;
+                        // Loslassen
+                    SendInput(1, &inputk, sizeof(INPUT));
+                }
    }
 }
 };
@@ -201,14 +233,6 @@ int main()
 
 
             if (maxVal > 0.8) {
-                // // std::cout << "Gefunden! King Maher! ";
-                // // start.x = normalize(p.x + rect.left + (albaz.cols / 2), desc.Width);
-                // // start.y = normalize(((p.y + rect.top) + (albaz.rows / 2)), desc.Height);
-                // // goal = get_cords(UiTarget::searchbar, crect.right, crect.bottom);
-                // ClientToScreen(game, &goal);
-                // goal.x = normalize(goal.x, desc.Width);
-                // goal.y = normalize(goal.y, desc.Height);
-                // //drag(start, goal);<
                 click(ygo.get_UI_coordinates(UiTarget::searchbar));
             }
         }
