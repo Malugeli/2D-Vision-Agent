@@ -10,11 +10,8 @@
 #include <opencv2/opencv.hpp>
 #include <string>
 #include "faktor.h"
+#include <print>
 
-void drag(POINT startcord, POINT targetcord);
-void click(POINT p);
-INPUT input{};    
-INPUT inputk{};
 
 struct ClientSide{// bisher sind wir nicht dynamisch. Wenn User bei Laufzeit die Resolution ändert ist ClientRect falsch.
     HWND game;
@@ -47,48 +44,50 @@ struct ClientSide{// bisher sind wir nicht dynamisch. Wenn User bei Laufzeit die
     }
 };
 
-struct bot{// übergib bereits normalisierte Werte für SendInput
+struct automate{// übergib bereits normalisierte Werte für SendInput
     INPUT inputM;
     INPUT inputK;
 
     //Maus
 
     void drag(POINT startcord, POINT targetcord){
-    input.mi.dx = startcord.x,
-    input.mi.dy = startcord.y,
-    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-    SendInput(1, &input, sizeof(input));
+    inputM.type = INPUT_MOUSE;
+    inputM.mi.dx = startcord.x,
+    inputM.mi.dy = startcord.y,
+    inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    SendInput(1, &inputM, sizeof(inputM));
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
-    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-    SendInput(1, &input, sizeof(input));
+    inputM.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    SendInput(1, &inputM, sizeof(inputM));
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
-    input.mi.dx = targetcord.x;
-    input.mi.dy = targetcord.y;
-    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-    SendInput(1, &input, sizeof(input));
+    inputM.mi.dx = targetcord.x;
+    inputM.mi.dy = targetcord.y;
+    inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    SendInput(1, &inputM, sizeof(inputM));
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
-    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-    SendInput(1, &input, sizeof(input));
+    inputM.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    SendInput(1, &inputM, sizeof(inputM));
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
     void click(POINT p){
-        input.mi.dx = p.x,
-        input.mi.dy = p.y,
-        input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-        SendInput(1, &input, sizeof(input));
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        inputM.type = INPUT_MOUSE;
+        inputM.mi.dx = p.x,
+        inputM.mi.dy = p.y,
+        inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+        SendInput(1, &inputM, sizeof(inputM));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-        input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-        SendInput(1, &input, sizeof(input));
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        inputM.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        SendInput(1, &inputM, sizeof(inputM));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-        input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-        SendInput(1, &input, sizeof(input));
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        inputM.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        SendInput(1, &inputM, sizeof(inputM));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
     
 // --------------------------------------------------------------------------------------------------------------------------
@@ -96,49 +95,48 @@ struct bot{// übergib bereits normalisierte Werte für SendInput
 
     //Tastatur
     void type_string(std::string_view s){
+        inputK.type = INPUT_KEYBOARD;
             for(char c : s){
                 SHORT checkKey = VkKeyScan(c);
-                if(checkKey & (1 >> 8)){
+                if((checkKey >> 8) & 1){
                     // Erstmal Shift drücken
-                    inputk.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
-                    inputk.ki.dwFlags = KEYEVENTF_SCANCODE;
-                    SendInput(1, &inputk, sizeof(INPUT));
+                    inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
+                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
+                    SendInput(1, &inputK, sizeof(INPUT));
                     std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
 
                     // Jetzt Buchstabe
                     BYTE virtualKey = VkKeyScan(c); // statt nochmal Funktionsaufruf kann ich Bitshiften und nur die untersten 8 Bits hier laden.
-                    inputk.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
-                    inputk.ki.dwFlags = KEYEVENTF_SCANCODE;
-                    SendInput(1, &inputk, sizeof(INPUT));
+                    inputK.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
+                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
+                    SendInput(1, &inputK, sizeof(INPUT));
                     std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
 
                     // Buchstabe Loslassen
-                    inputk.ki.dwFlags = KEYEVENTF_KEYUP;
-                    SendInput(1, &inputk, sizeof(INPUT));   
+                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
+                    SendInput(1, &inputK, sizeof(INPUT));   
                     std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
 
                     // dann Shift loslassen
-                    inputk.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
-                    inputk.ki.dwFlags = KEYEVENTF_KEYUP;
-                    SendInput(1, &inputk, sizeof(INPUT));   
+                    inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
+                    SendInput(1, &inputK, sizeof(INPUT));   
                     std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
                 }
                 else
                 {               
                     BYTE virtualKey = VkKeyScan(c);
-                    inputk.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
+                    inputK.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
                     
-                    // WICHTIG FÜR GAMES: Wir nutzen Scan Codes, nicht Virtual Keys
-                    inputk.ki.dwFlags = KEYEVENTF_SCANCODE; // Drücken (Key Down)
+                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE; // Drücken (Key Down)
 
                     // --- KEY DOWN ---
-                    SendInput(1, &inputk, sizeof(INPUT));
+                    SendInput(1, &inputK, sizeof(INPUT));
                     std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
 
                     // --- KEY UP ---
-                    inputk.ki.dwFlags = KEYEVENTF_KEYUP;
+                    inputK.ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
                         // Loslassen
-                    SendInput(1, &inputk, sizeof(INPUT));
+                    SendInput(1, &inputK, sizeof(INPUT));
                 }
    }
 }
@@ -151,8 +149,7 @@ int main()
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     HWND game = FindWindow(NULL, "masterduel");
     ClientSide ygo(game);
-    input.type = INPUT_MOUSE; //ist hässlich idk ob ich das hier so lasse
-    inputk.type = INPUT_KEYBOARD; //same
+    automate bot;
     RECT rect;
     GetWindowRect(game, &rect);
     int height = rect.bottom - rect.top;
@@ -233,10 +230,14 @@ int main()
 
 
             if (maxVal > 0.8) {
-                click(ygo.get_UI_coordinates(UiTarget::searchbar));
+                bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
+                bot.type_string("Fallen of Albaz");
+                std::println("Gefunden");
+                break;
             }
         }
         context->Unmap(cpuframe.get(), 0);
-        dupli->ReleaseFrame(); 
+        dupli->ReleaseFrame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
