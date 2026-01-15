@@ -16,25 +16,29 @@
 struct ClientSide{// bisher sind wir nicht dynamisch. Wenn User bei Laufzeit die Resolution ändert ist ClientRect falsch.
     HWND game;
     RECT ClientRect;
-    int width = 3840;
-    int height = 2160;
- 
+    
     ClientSide() = default;
     ClientSide(HWND input) : game(input != NULL ? input : nullptr){
         GetClientRect(game, &ClientRect);
     }
     
     POINT normalize(POINT p){ // Konvertiert P zu SendInput fähigen Zahlen
+        HMONITOR monitor = MonitorFromWindow(game, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO info;
+        info.cbSize = sizeof(MONITORINFO);
+        GetMonitorInfo(monitor, &info);
+        int width = info.rcMonitor.right - info.rcMonitor.left;
+        int height = info.rcMonitor.bottom - info.rcMonitor.top;
+        
         p.x = std::lround((p.x * 65535.0) / width);
         p.y = std::lround((p.y * 65535.0) / height);
         return p;
     }
 
-    POINT convert_coordinates(POINT p){ // Konvertiert ClientToScreenPixel zu ScreenPixel und normalisiert für SendInput (ich empfehle die Funktion nur als Argument für SendInput zu nutzen da User Fenster ansonsten bewegen kann und Daten outdated werden)
+    POINT convert_coordinates(POINT p){ // Konvertiert ClientToScreenPixel zu ScreenPixel und normalisiert für SendInput
         ClientToScreen(game, &p);
         return normalize(p);       
     }
-
 
     POINT get_UI_coordinates(UiTarget target){ // gib nur das UI ein und du erhältst SendInput Ready Koordinaten
         POINT p;
@@ -44,12 +48,11 @@ struct ClientSide{// bisher sind wir nicht dynamisch. Wenn User bei Laufzeit die
     }
 };
 
-struct automate{// übergib bereits normalisierte Werte für SendInput
+struct automate{ // Nur normalisierte Koordinaten angeben!
     INPUT inputM;
     INPUT inputK;
 
     //Maus
-
     void drag(POINT startcord, POINT targetcord){
     inputM.type = INPUT_MOUSE;
     inputM.mi.dx = startcord.x,
@@ -89,9 +92,6 @@ struct automate{// übergib bereits normalisierte Werte für SendInput
         SendInput(1, &inputM, sizeof(inputM));
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
-    
-// --------------------------------------------------------------------------------------------------------------------------
-    // --------------------------------------------------------------------------------------------------------------------------
 
     //Tastatur
     void type_string(std::string_view s){
@@ -143,7 +143,7 @@ struct automate{// übergib bereits normalisierte Werte für SendInput
 };
 
 
-//am ende des Tages wirds wahrscheinlich mindestens 2 Klassen geben 1. die ClientSide von Game und Koordinatenberechnung und 2. Der Bot selbst.
+
 int main()
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
