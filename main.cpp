@@ -11,9 +11,10 @@
 #include <string>
 #include "faktor.h"
 #include <print>
+#include <random>
 
 
-struct ClientSide{// bisher sind wir nicht dynamisch. Wenn User bei Laufzeit die Resolution ändert ist ClientRect falsch.
+struct ClientSide{
     HWND game;
     RECT ClientRect;
     
@@ -48,9 +49,16 @@ struct ClientSide{// bisher sind wir nicht dynamisch. Wenn User bei Laufzeit die
     }
 };
 
-struct automate{ // Nur normalisierte Koordinaten angeben!
+struct automate{
     INPUT inputM;
     INPUT inputK;
+    ClientSide& client;
+
+    automate() = default;
+    automate(ClientSide& otherclient) : client(otherclient){
+
+    }; // sehr wichtig für mich! Dependancy einer anderen Klasse!
+
 
     //Maus
     void drag(POINT startcord, POINT targetcord){
@@ -92,6 +100,21 @@ struct automate{ // Nur normalisierte Koordinaten angeben!
         SendInput(1, &inputM, sizeof(inputM));
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
+
+    void bezierCurve(POINT goal){ //die Variable T ist bisher noch nicht dynamisch, sprich für einen kurzen Weg senden wir genau so viele Inputs wie bei einem sehr langen Weg.
+        POINT start;
+        POINT p1; // Magnet 1
+        POINT p2; // Magnet 2
+        GetCursorPos(&start);
+        inputM.type = INPUT_MOUSE;
+        inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    
+        for(double t = 0.0; t <= 1.0; t = t + 0.1){
+            inputM.mi.dx = round((pow((1 - t), 3)) * (start.x + 3) * pow((1 - t), 2) * t * p1.x + 3 * (1 - t) * pow(t, 2) * p2.x + pow(t, 3) * goal.x);
+            inputM.mi.dx = round((pow((1 - t), 3)) * (start.y + 3) * pow((1 - t), 2) * t * p1.y + 3 * (1 - t) * pow(t, 2) * p2.y + pow(t, 3) * goal.y);
+            SendInput(1, &inputM, sizeof(inputM));
+        }
+    }
 
     //Tastatur
     void type_string(std::string_view s){
@@ -149,7 +172,7 @@ int main()
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     HWND game = FindWindow(NULL, "masterduel");
     ClientSide ygo(game);
-    automate bot;
+    automate bot(ygo);
     RECT rect;
     GetWindowRect(game, &rect);
     int height = rect.bottom - rect.top;
@@ -178,6 +201,7 @@ int main()
     wil::com_ptr<ID3D11Texture2D> cpuframe;
     D3D11_TEXTURE2D_DESC desc;
 
+    
     cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/albaz.png");
     if (albaz.empty()) {
         std::cout << "Albaz nicht gefunden! ";
@@ -241,3 +265,5 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
+
+
