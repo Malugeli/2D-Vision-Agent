@@ -53,13 +53,13 @@ struct automate{
     INPUT inputM;
     INPUT inputK;
     ClientSide& client;
+    std::random_device rd;
+    std::mt19937 gen;
+    std::normal_distribution<double> pausen;
 
     automate() = default;
-    automate(ClientSide& otherclient) : client(otherclient){
-
-    }; // sehr wichtig für mich! Dependancy einer anderen Klasse!
-
-
+    automate(ClientSide& otherclient) : client(otherclient), gen(rd), pausen(120, 20) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
+    
     //Maus
     void drag(POINT startcord, POINT targetcord){
     inputM.type = INPUT_MOUSE;
