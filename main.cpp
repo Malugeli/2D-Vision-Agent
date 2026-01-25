@@ -3,7 +3,7 @@
 #include <chrono>
 #define NOMINMAX
 #include <Windows.h>
-#include "C:\Users\aluge\Desktop\Mahers Headerfiles/unique_hotkey.h"
+#include "C:\Users\aluge\Desktop\Computer Science\Projekte\YgoBotMaher\unique_hotkey.h"
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <wil/com.h>
@@ -55,10 +55,11 @@ struct automate{
     ClientSide& client;
     std::random_device rd;
     std::mt19937 gen;
-    std::normal_distribution<double> pausen;
+    std::normal_distribution<double> pause;
+    std::uniform_int_distribution<int> magnet;
 
     automate() = default;
-    automate(ClientSide& otherclient) : client(otherclient), gen(rd), pausen(120, 20) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
+    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(120, 20), magnet(-100, 100) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
     
     //Maus
     void drag(POINT startcord, POINT targetcord){
@@ -67,21 +68,21 @@ struct automate{
     inputM.mi.dy = startcord.y,
     inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     SendInput(1, &inputM, sizeof(inputM));
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
 
     inputM.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
     SendInput(1, &inputM, sizeof(inputM));
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
 
     inputM.mi.dx = targetcord.x;
     inputM.mi.dy = targetcord.y;
     inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     SendInput(1, &inputM, sizeof(inputM));
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
 
     inputM.mi.dwFlags = MOUSEEVENTF_LEFTUP;
     SendInput(1, &inputM, sizeof(inputM));
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
 }
 
     void click(POINT p){
@@ -90,29 +91,39 @@ struct automate{
         inputM.mi.dy = p.y,
         inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
         SendInput(1, &inputM, sizeof(inputM));
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
 
         inputM.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
         SendInput(1, &inputM, sizeof(inputM));
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
 
         inputM.mi.dwFlags = MOUSEEVENTF_LEFTUP;
         SendInput(1, &inputM, sizeof(inputM));
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
 }
 
     void bezierCurve(POINT goal){ //die Variable T ist bisher noch nicht dynamisch, sprich für einen kurzen Weg senden wir genau so viele Inputs wie bei einem sehr langen Weg.
         POINT start;
+        GetCursorPos(&start);
         POINT p1; // Magnet 1
         POINT p2; // Magnet 2
-        GetCursorPos(&start);
+        POINT way;
+        p1.x = start.x + ((goal.x - start.x) * 0.3) + magnet(gen);
+        p1.y = start.y + ((goal.y - start.y) * 0.3) + magnet(gen);
+        
+        p2.x = start.x + ((goal.x - start.x) * 0.7) + magnet(gen);
+        p2.y = start.y + ((goal.y - start.y) * 0.7) + magnet(gen);
         inputM.type = INPUT_MOUSE;
         inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     
         for(double t = 0.0; t <= 1.0; t = t + 0.1){
-            inputM.mi.dx = round((pow((1 - t), 3)) * (start.x + 3) * pow((1 - t), 2) * t * p1.x + 3 * (1 - t) * pow(t, 2) * p2.x + pow(t, 3) * goal.x);
-            inputM.mi.dx = round((pow((1 - t), 3)) * (start.y + 3) * pow((1 - t), 2) * t * p1.y + 3 * (1 - t) * pow(t, 2) * p2.y + pow(t, 3) * goal.y);
+            way.x = round((pow((1 - t), 3)) * (start.x + 3) * pow((1 - t), 2) * t * p1.x + 3 * (1 - t) * pow(t, 2) * p2.x + pow(t, 3) * goal.x);
+            way.y = round((pow((1 - t), 3)) * (start.y + 3) * pow((1 - t), 2) * t * p1.y + 3 * (1 - t) * pow(t, 2) * p2.y + pow(t, 3) * goal.y);
+            way = client.normalize(way);
+            inputM.mi.dx = way.x;
+            inputM.mi.dy = way.y;
             SendInput(1, &inputM, sizeof(inputM));
+            std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
         }
     }
 
@@ -253,10 +264,10 @@ int main()
             cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
 
 
-            if (maxVal > 0.8) {
-                bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
-                bot.type_string("Fallen of Albaz");
+            if (maxVal > 0.7) {
                 std::println("Gefunden");
+                bot.bezierCurve(ygo.get_UI_coordinates(UiTarget::searchbar));
+                bot.type_string("Fallen of Albaz");
                 break;
             }
         }
@@ -265,5 +276,3 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
-
-
