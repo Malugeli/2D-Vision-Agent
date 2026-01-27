@@ -41,11 +41,19 @@ struct ClientSide{
         return normalize(p);       
     }
 
-    POINT get_UI_coordinates(UiTarget target){ // gib nur das UI ein und du erhältst SendInput Ready Koordinaten
+    POINT get_UI_coordinates_normalized(UiTarget target){ // gib nur das UI ein und du erhältst SendInput Ready Koordinaten
         POINT p;
         p.x = std::lround(ClientRect.right * UI[std::to_underlying(target)].x);
         p.y = std::lround(ClientRect.bottom * UI[std::to_underlying(target)].y);
         return convert_coordinates(p);
+    }
+    
+    POINT get_UI_coordinates(UiTarget target){ // gibt die UI Koordinaten auf den Bildschirm zurück ohne Normalization
+        POINT p;
+        p.x = std::lround(ClientRect.right * UI[std::to_underlying(target)].x);
+        p.y = std::lround(ClientRect.bottom * UI[std::to_underlying(target)].y);
+        ClientToScreen(game, &p);
+        return p;
     }
 };
 
@@ -59,50 +67,9 @@ struct automate{
     std::uniform_int_distribution<int> magnet;
 
     automate() = default;
-    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(120, 20), magnet(-100, 100) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
+    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(70, 10), magnet(-100, 100) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
     
-    //Maus
-    void drag(POINT startcord, POINT targetcord){
-    inputM.type = INPUT_MOUSE;
-    inputM.mi.dx = startcord.x,
-    inputM.mi.dy = startcord.y,
-    inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-    SendInput(1, &inputM, sizeof(inputM));
-    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
-
-    inputM.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-    SendInput(1, &inputM, sizeof(inputM));
-    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
-
-    inputM.mi.dx = targetcord.x;
-    inputM.mi.dy = targetcord.y;
-    inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-    SendInput(1, &inputM, sizeof(inputM));
-    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
-
-    inputM.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-    SendInput(1, &inputM, sizeof(inputM));
-    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
-}
-
-    void click(POINT p){
-        inputM.type = INPUT_MOUSE;
-        inputM.mi.dx = p.x,
-        inputM.mi.dy = p.y,
-        inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-        SendInput(1, &inputM, sizeof(inputM));
-        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
-
-        inputM.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-        SendInput(1, &inputM, sizeof(inputM));
-        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
-
-        inputM.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-        SendInput(1, &inputM, sizeof(inputM));
-        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
-}
-
-    void bezierCurve(POINT goal){ //die Variable T ist bisher noch nicht dynamisch, sprich für einen kurzen Weg senden wir genau so viele Inputs wie bei einem sehr langen Weg.
+    void mouse_move(POINT goal){ //die Variable T ist bisher noch nicht dynamisch, sprich für einen kurzen Weg senden wir genau so viele Inputs wie bei einem sehr langen Weg.
         POINT start;
         GetCursorPos(&start);
         POINT p1; // Magnet 1
@@ -117,15 +84,50 @@ struct automate{
         inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     
         for(double t = 0.0; t <= 1.0; t = t + 0.1){
-            way.x = round((pow((1 - t), 3)) * (start.x + 3) * pow((1 - t), 2) * t * p1.x + 3 * (1 - t) * pow(t, 2) * p2.x + pow(t, 3) * goal.x);
-            way.y = round((pow((1 - t), 3)) * (start.y + 3) * pow((1 - t), 2) * t * p1.y + 3 * (1 - t) * pow(t, 2) * p2.y + pow(t, 3) * goal.y);
+            // Die Variablen werden niemals im RAM landen, Compiler versteht das die nur temp sind und schreibt sie direkt ins Register.
+            const double u = 1 - t;
+            const double tt = t * t;
+            const double uu = u * u;
+            const double uuu = uu * u;
+            const double ttt = tt * t;
+    
+            way.x = round(uuu * start.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * goal.x);
+            way.y = round(uuu * start.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * goal.y);
             way = client.normalize(way);
             inputM.mi.dx = way.x;
             inputM.mi.dy = way.y;
             SendInput(1, &inputM, sizeof(inputM));
-            std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
         }
     }
+    
+    void click(POINT p){
+        mouse_move(p);
+    
+        inputM.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        SendInput(1, &inputM, sizeof(inputM));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+    
+        inputM.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        SendInput(1, &inputM, sizeof(inputM));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+    }
+
+    void drag(POINT startcord, POINT targetcord){
+    mouse_move(startcord);
+
+    inputM.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    SendInput(1, &inputM, sizeof(inputM));
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+
+    mouse_move(targetcord);
+
+    inputM.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    SendInput(1, &inputM, sizeof(inputM));
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+}
+
+
 
     //Tastatur
     void type_string(std::string_view s){
@@ -137,24 +139,24 @@ struct automate{
                     inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
                     inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
                     SendInput(1, &inputK, sizeof(INPUT));
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
 
                     // Jetzt Buchstabe
                     BYTE virtualKey = VkKeyScan(c); // statt nochmal Funktionsaufruf kann ich Bitshiften und nur die untersten 8 Bits hier laden.
                     inputK.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
                     inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
                     SendInput(1, &inputK, sizeof(INPUT));
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
 
                     // Buchstabe Loslassen
                     inputK.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
                     SendInput(1, &inputK, sizeof(INPUT));   
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
 
                     // dann Shift loslassen
                     inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
                     SendInput(1, &inputK, sizeof(INPUT));   
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
                 }
                 else
                 {               
@@ -165,7 +167,7 @@ struct automate{
 
                     // --- KEY DOWN ---
                     SendInput(1, &inputK, sizeof(INPUT));
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
 
                     // --- KEY UP ---
                     inputK.ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
@@ -175,7 +177,6 @@ struct automate{
    }
 }
 };
-
 
 
 int main()
@@ -213,12 +214,12 @@ int main()
     D3D11_TEXTURE2D_DESC desc;
 
     
-    cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/albaz.png");
+    cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/albaz.png");
     if (albaz.empty()) {
         std::cout << "Albaz nicht gefunden! ";
         return 1;
     }
-    cv::Mat albazklein = cv::imread("C:/Users/aluge/Desktop/albazklein.png");
+    cv::Mat albazklein = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/albazklein.png");
         if (albazklein.empty()) {
         std::cout << "Albazklein nicht gefunden! ";
         return 1;
@@ -265,8 +266,15 @@ int main()
 
 
             if (maxVal > 0.7) {
-                std::println("Gefunden");
-                bot.bezierCurve(ygo.get_UI_coordinates(UiTarget::searchbar));
+                POINT maher;
+                maher.x = p.x;
+                maher.y = p.y;
+                ClientToScreen(game, &maher);
+                bot.drag(maher, ygo.get_UI_coordinates(UiTarget::out));
+                break;
+            }
+            else{
+                bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
                 bot.type_string("Fallen of Albaz");
                 break;
             }
