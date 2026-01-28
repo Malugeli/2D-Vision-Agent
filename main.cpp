@@ -67,7 +67,7 @@ struct automate{
     std::uniform_int_distribution<int> magnet;
 
     automate() = default;
-    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(70, 10), magnet(-100, 100) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
+    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(70, 10), magnet(-200, 200) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
     
     void mouse_move(POINT goal){ //die Variable T ist bisher noch nicht dynamisch, sprich für einen kurzen Weg senden wir genau so viele Inputs wie bei einem sehr langen Weg.
         POINT start;
@@ -247,38 +247,38 @@ int main()
         D3D11_MAPPED_SUBRESOURCE mapped;
         context->Map(cpuframe.get(), 0, D3D11_MAP_READ, 0, &mapped);
 
-        {
-            // Scope für Mat, damit wir sicher sind, wann wir auf die Daten zugreifen
-            cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
+        cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
+        
+        // Konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zu 'albaz' passt
+        cv::Mat screenshotBGR;
+        cv::cvtColor(screenshotBGRA, screenshotBGR, cv::COLOR_BGRA2BGR);
 
-            cv::Mat screenshotBGR;
-            // Konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zu 'albaz' passt
-            cv::cvtColor(screenshotBGRA, screenshotBGR, cv::COLOR_BGRA2BGR);
+        // Jetzt sind beide BGR -> matchTemplate funktioniert
+        cv::Mat result;
+        cv::matchTemplate(screenshotBGR, albaz, result, cv::TM_CCOEFF_NORMED);
 
-            // Jetzt sind beide BGR -> matchTemplate funktioniert
-            cv::Mat result;
-            cv::matchTemplate(screenshotBGR(maher), albaz, result, cv::TM_CCOEFF_NORMED);
-
-            double minVal;
-            double maxVal;
-            cv::Point p;
-            cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
+        double minVal;
+        double maxVal;
+        cv::Point p;
+        cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
 
 
-            if (maxVal > 0.7) {
-                POINT maher;
-                maher.x = p.x;
-                maher.y = p.y;
-                ClientToScreen(game, &maher);
-                bot.drag(maher, ygo.get_UI_coordinates(UiTarget::out));
-                break;
-            }
-            else{
-                bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
-                bot.type_string("Fallen of Albaz");
-                break;
-            }
+        if (maxVal > 0.7) {
+            POINT maher;
+            maher.x = p.x;
+            maher.y = p.y;
+            ClientToScreen(game, &maher);
+            bot.drag(maher, ygo.get_UI_coordinates(UiTarget::out));
+            std::print("{}", maxVal);
+            break;
         }
+        else{
+            bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
+            bot.type_string("Fallen of Albaz");
+            std::print("{}", maxVal);
+            break;
+        }
+
         context->Unmap(cpuframe.get(), 0);
         dupli->ReleaseFrame();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
