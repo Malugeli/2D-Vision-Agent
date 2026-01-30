@@ -67,7 +67,7 @@ struct automate{
     std::uniform_int_distribution<int> magnet;
 
     automate() = default;
-    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(70, 10), magnet(-200, 200) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
+    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(90, 10), magnet(-200, 200) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
     
     void mouse_move(POINT goal){ //die Variable T ist bisher noch nicht dynamisch, sprich für einen kurzen Weg senden wir genau so viele Inputs wie bei einem sehr langen Weg.
         POINT start;
@@ -175,7 +175,61 @@ struct automate{
                     SendInput(1, &inputK, sizeof(INPUT));
                 }
    }
-}
+    }
+
+        void type_string_return(std::string_view s){ //selbe Funktion wie oben nur am Ende noch Enter. Erinnert mich an std::print() und std::println(). Nicht sicher ob das optimal ist..
+        inputK.type = INPUT_KEYBOARD;
+            for(char c : s){
+                SHORT checkKey = VkKeyScan(c);
+                if((checkKey >> 8) & 1){
+                    // Erstmal Shift drücken
+                    inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
+                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
+                    SendInput(1, &inputK, sizeof(INPUT));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
+
+                    // Jetzt Buchstabe
+                    BYTE virtualKey = VkKeyScan(c); // statt nochmal Funktionsaufruf kann ich Bitshiften und nur die untersten 8 Bits hier laden.
+                    inputK.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
+                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
+                    SendInput(1, &inputK, sizeof(INPUT));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
+
+                    // Buchstabe Loslassen
+                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
+                    SendInput(1, &inputK, sizeof(INPUT));   
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
+
+                    // dann Shift loslassen
+                    inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
+                    SendInput(1, &inputK, sizeof(INPUT));   
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
+                }
+                else
+                {               
+                    BYTE virtualKey = VkKeyScan(c);
+                    inputK.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
+                    
+                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE; // Drücken (Key Down)
+
+                    // --- KEY DOWN ---
+                    SendInput(1, &inputK, sizeof(INPUT));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
+
+                    // --- KEY UP ---
+                    inputK.ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
+                        // Loslassen
+                    SendInput(1, &inputK, sizeof(INPUT));
+                }
+   }
+    inputK.ki.wScan = MapVirtualKey(VK_RETURN, MAPVK_VK_TO_VSC);
+    inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
+    SendInput(1, &inputK, sizeof(INPUT));
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+    inputK.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
+    SendInput(1, &inputK, sizeof(INPUT));
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
+    }
 };
 
 
@@ -225,9 +279,13 @@ int main()
         return 1;
     }
 
+    //First Frame ist oft Fehlerhaft. Wir holen uns den ersten Frame und verwerfen ihn instant wieder..
+    wil::com_ptr<IDXGIResource> frame;
+    DXGI_OUTDUPL_FRAME_INFO frameinfo;
+    THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
+    dupli->ReleaseFrame();
+
     while (true) {
-        wil::com_ptr<IDXGIResource> frame;
-        DXGI_OUTDUPL_FRAME_INFO frameinfo;
         THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
 
         auto realframe = frame.query<ID3D11Texture2D>();
@@ -267,16 +325,11 @@ int main()
             POINT maher;
             maher.x = p.x;
             maher.y = p.y;
-            ClientToScreen(game, &maher);
             bot.drag(maher, ygo.get_UI_coordinates(UiTarget::out));
-            std::print("{}", maxVal);
-            break;
         }
         else{
             bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
-            bot.type_string("Fallen of Albaz");
-            std::print("{}", maxVal);
-            break;
+            bot.type_string_return("Fallen of Albaz");
         }
 
         context->Unmap(cpuframe.get(), 0);
