@@ -70,6 +70,8 @@ struct visualSide{
     wil::com_ptr<IDXGIResource> frame;
     DXGI_OUTDUPL_FRAME_INFO frameinfo;
     cv::Mat currentFrame;
+    cv::Rect gameRect;
+
 
     visualSide(ClientSide& client) : visualClient(client){
         THROW_IF_FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device, &feature, &context));
@@ -81,6 +83,9 @@ struct visualSide{
         // erster Frame ist Fehlerhaft. Wir löschen ihn direkt wieder
         THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
         dupli->ReleaseFrame();
+        int height = visualClient.ClientRect.bottom - visualClient.ClientRect.top;
+        int width = visualClient.ClientRect.right - visualClient.ClientRect.left;
+        cv::Rect gameRect(visualClient.ClientRect.left, visualClient.ClientRect.top, width, height);
     }
 
     void updateFrame(){
@@ -113,7 +118,7 @@ struct visualSide{
 
     std::optional<POINT> findCard(cv::Mat card){
         cv::Mat result;
-        cv::matchTemplate(currentFrame, card, result, cv::TM_CCOEFF_NORMED);
+        cv::matchTemplate(currentFrame(gameRect), card, result, cv::TM_CCOEFF_NORMED);
 
         double minVal;
         double maxVal;
@@ -122,8 +127,8 @@ struct visualSide{
         
         if (maxVal > 0.7) {
             POINT pp;
-            pp.x = p.x;
-            pp.y = p.y;
+            pp.x = p.x + (card.cols / 2); // Greift die Karte direkt in der Mitte. Sehr sus für Anti-Cheat
+            pp.y = p.y + (card.rows / 2);
             return pp;
         }
         else{
@@ -315,33 +320,7 @@ int main()
     HWND game = FindWindow(NULL, "masterduel");
     ClientSide ygo(game);
     automate bot(ygo);
-    RECT rect;
-    GetWindowRect(game, &rect);
-    int height = rect.bottom - rect.top;
-    int width = rect.right - rect.left;
-    cv::Rect maher(rect.left, rect.top, width, height);
-
-    wil::com_ptr<ID3D11Device> device;
-    wil::com_ptr<ID3D11DeviceContext> context;
-    D3D_FEATURE_LEVEL feature;    
-
-    THROW_IF_FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device, &feature, &context));
-
-    auto idxgi = device.query<IDXGIDevice>();
-
-    wil::com_ptr<IDXGIAdapter> adapter;
-    THROW_IF_FAILED(idxgi->GetAdapter(&adapter));
-
-    wil::com_ptr<IDXGIOutput> output;
-    THROW_IF_FAILED(adapter->EnumOutputs(0, &output));
-    
-    auto output1 = output.query<IDXGIOutput1>();
-
-    wil::com_ptr<IDXGIOutputDuplication> dupli;
-    THROW_IF_FAILED(output1->DuplicateOutput(device.get(), &dupli));
-
-    wil::com_ptr<ID3D11Texture2D> cpuframe;
-    D3D11_TEXTURE2D_DESC desc;
+    visualSide visual(ygo);
 
     //Bleibt in main fürs erste. Erstelle eigene struct später dafür    
     cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/albaz.png");
@@ -355,61 +334,14 @@ int main()
         return 1;
     }
 
-    //First Frame ist oft Fehlerhaft. Wir holen uns den ersten Frame und verwerfen ihn instant wieder..
-    wil::com_ptr<IDXGIResource> frame;
-    DXGI_OUTDUPL_FRAME_INFO frameinfo;
-    THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
-    dupli->ReleaseFrame();
-
     while (true) {
-        THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
-
-        auto realframe = frame.query<ID3D11Texture2D>();
-
-        if(!cpuframe)
-        {
-            realframe->GetDesc(&desc);
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-            desc.Usage = D3D11_USAGE_STAGING;
-            desc.BindFlags = 0;
-            desc.MiscFlags = 0;
-            THROW_IF_FAILED(device->CreateTexture2D(&desc, nullptr, &cpuframe));
-        }
-        
-        context->CopyResource(cpuframe.get(), realframe.get());
-
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        context->Map(cpuframe.get(), 0, D3D11_MAP_READ, 0, &mapped);
-
-        cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
-        
-        // Konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zu 'albaz' passt
-        cv::Mat screenshotBGR;
-        cv::cvtColor(screenshotBGRA, screenshotBGR, cv::COLOR_BGRA2BGR);
-
-        // Jetzt sind beide BGR -> matchTemplate funktioniert
-        cv::Mat result;
-        cv::matchTemplate(screenshotBGR, albaz, result, cv::TM_CCOEFF_NORMED);
-
-        double minVal;
-        double maxVal;
-        cv::Point p;
-        cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
-
-
-        if (maxVal > 0.7) {
-            POINT maher;
-            maher.x = p.x + (albaz.cols / 2);
-            maher.y = p.y + (albaz.rows / 2);
-            bot.drag(maher, ygo.get_UI_coordinates(UiTarget::out));
+        visual.updateFrame();
+        if (auto card = visual.findCard(albaz)) {
+            bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::out));
         }
         else{
             bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
             bot.type_string_return("Fallen of Albaz");
         }
-
-        context->Unmap(cpuframe.get(), 0);
-        dupli->ReleaseFrame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
