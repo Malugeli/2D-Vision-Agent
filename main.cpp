@@ -57,6 +57,81 @@ struct ClientSide{
     }
 };
 
+struct visualSide{
+    ClientSide& visualClient;
+    wil::com_ptr<ID3D11Device> device;
+    wil::com_ptr<ID3D11DeviceContext> context;
+    D3D_FEATURE_LEVEL feature;
+    wil::com_ptr<IDXGIAdapter> adapter;
+    wil::com_ptr<IDXGIOutput> output;
+    wil::com_ptr<IDXGIOutputDuplication> dupli;
+    wil::com_ptr<ID3D11Texture2D> cpuframe;
+    D3D11_TEXTURE2D_DESC desc;
+    wil::com_ptr<IDXGIResource> frame;
+    DXGI_OUTDUPL_FRAME_INFO frameinfo;
+    cv::Mat currentFrame;
+
+    visualSide(ClientSide& client) : visualClient(client){
+        THROW_IF_FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device, &feature, &context));
+        auto idxgi = device.query<IDXGIDevice>();
+        THROW_IF_FAILED(idxgi->GetAdapter(&adapter));
+        THROW_IF_FAILED(adapter->EnumOutputs(0, &output));
+        auto output1 = output.query<IDXGIOutput1>();
+        THROW_IF_FAILED(output1->DuplicateOutput(device.get(), &dupli));
+        // erster Frame ist Fehlerhaft. Wir löschen ihn direkt wieder
+        THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
+        dupli->ReleaseFrame();
+    }
+
+    void updateFrame(){
+        THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
+
+        auto realframe = frame.query<ID3D11Texture2D>();
+
+        if(!cpuframe)
+        {
+            realframe->GetDesc(&desc);
+            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            desc.Usage = D3D11_USAGE_STAGING;
+            desc.BindFlags = 0;
+            desc.MiscFlags = 0;
+            THROW_IF_FAILED(device->CreateTexture2D(&desc, nullptr, &cpuframe));
+        }
+        
+        context->CopyResource(cpuframe.get(), realframe.get());
+
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        context->Map(cpuframe.get(), 0, D3D11_MAP_READ, 0, &mapped);
+
+        cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
+        
+        // Konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zur PNG passt
+        cv::cvtColor(screenshotBGRA, currentFrame, cv::COLOR_BGRA2BGR);
+        dupli->ReleaseFrame();
+        context->Unmap(cpuframe.get(), 0);
+    }
+
+    std::optional<POINT> findCard(cv::Mat card){
+        cv::Mat result;
+        cv::matchTemplate(currentFrame, card, result, cv::TM_CCOEFF_NORMED);
+
+        double minVal;
+        double maxVal;
+        cv::Point p;
+        cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
+        
+        if (maxVal > 0.7) {
+            POINT pp;
+            pp.x = p.x;
+            pp.y = p.y;
+            return pp;
+        }
+        else{
+            return std::nullopt;
+        }
+    }
+};
+
 struct automate{
     INPUT inputM;
     INPUT inputK;
@@ -66,7 +141,6 @@ struct automate{
     std::normal_distribution<double> pause;
     std::uniform_int_distribution<int> magnet;
 
-    automate() = default;
     automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(90, 10), magnet(-200, 200) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
     
     void mouse_move(POINT goal){ //die Variable T ist bisher noch nicht dynamisch, sprich für einen kurzen Weg senden wir genau so viele Inputs wie bei einem sehr langen Weg.
@@ -233,6 +307,8 @@ struct automate{
 };
 
 
+
+
 int main()
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -267,7 +343,7 @@ int main()
     wil::com_ptr<ID3D11Texture2D> cpuframe;
     D3D11_TEXTURE2D_DESC desc;
 
-    
+    //Bleibt in main fürs erste. Erstelle eigene struct später dafür    
     cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/albaz.png");
     if (albaz.empty()) {
         std::cout << "Albaz nicht gefunden! ";
@@ -323,8 +399,8 @@ int main()
 
         if (maxVal > 0.7) {
             POINT maher;
-            maher.x = p.x;
-            maher.y = p.y;
+            maher.x = p.x + (albaz.cols / 2);
+            maher.y = p.y + (albaz.rows / 2);
             bot.drag(maher, ygo.get_UI_coordinates(UiTarget::out));
         }
         else{
