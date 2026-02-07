@@ -1,12 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
+project(YgoBotMaher CXX)
 
-# WICHTIG: Hier ändern wir auf den Windows-Standard (MSVC)
-# "x64-windows" ist der Standard für Visual Studio
-set(VCPKG_TARGET_TRIPLET "x64-windows")
-
-project(MeinOpenCVProjekt CXX)
-
-# C++23 Standard aktivieren
+# C++23 aktivieren
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -14,19 +9,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(OpenCV REQUIRED)
 find_package(wil CONFIG REQUIRED)
 
-# Debug-Info (optional, kannst du drin lassen)
-message(STATUS "DEBUG: OpenCV Include Ordner: ${OpenCV_INCLUDE_DIRS}")
-message(STATUS "DEBUG: OpenCV Bibliotheken: ${OpenCV_LIBS}")
+# Executable erstellen (Darf nur EINMAL im File stehen!)
+add_executable(YgoBotMaher main.cpp)
 
-include_directories(${OpenCV_INCLUDE_DIRS})
-
-add_executable(app main.cpp)
-
-# WICHTIG: "stdc++exp" entfernen!
-# Das war eine Spezial-Bibliothek für GCC (MinGW). MSVC braucht die nicht.
-target_link_libraries(app PRIVATE ${OpenCV_LIBS} d3d11 dxgi user32 WIL::WIL)
-
-if(MSVC)
-    # /utf-8: Setzt Source- und Execution-Charset auf UTF-8
-    add_compile_options(/utf-8)
-endif()
+# Alles verlinken (OpenCV + WIL + DirectX)
+target_link_libraries(YgoBotMaher PRIVATE 
+    ${OpenCV_LIBS} 
+    WIL::WIL
+    d3d11
+    dxgi
+    user32
+)
