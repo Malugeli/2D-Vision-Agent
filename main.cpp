@@ -13,6 +13,7 @@
 #include <print>
 #include <random>
 
+double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
 
 struct ClientSide{
     HWND game;
@@ -71,6 +72,7 @@ struct visualSide{
     DXGI_OUTDUPL_FRAME_INFO frameinfo;
     cv::Mat currentFrame;
     cv::Rect gameRect;
+    RECT windowRect;
 
 
     visualSide(ClientSide& client) : visualClient(client){
@@ -80,19 +82,18 @@ struct visualSide{
         THROW_IF_FAILED(adapter->EnumOutputs(0, &output));
         auto output1 = output.query<IDXGIOutput1>();
         THROW_IF_FAILED(output1->DuplicateOutput(device.get(), &dupli));
+
         // erster Frame ist Fehlerhaft. Wir löschen ihn direkt wieder
         THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
         dupli->ReleaseFrame();
-        int height = visualClient.ClientRect.bottom - visualClient.ClientRect.top;
-        int width = visualClient.ClientRect.right - visualClient.ClientRect.left;
-        cv::Rect gameRect(visualClient.ClientRect.left, visualClient.ClientRect.top, width, height);
-    }
 
+    }
+    
     void updateFrame(){
         THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
-
+        
         auto realframe = frame.query<ID3D11Texture2D>();
-
+        
         if(!cpuframe)
         {
             realframe->GetDesc(&desc);
@@ -104,14 +105,23 @@ struct visualSide{
         }
         
         context->CopyResource(cpuframe.get(), realframe.get());
-
+        
         D3D11_MAPPED_SUBRESOURCE mapped;
         context->Map(cpuframe.get(), 0, D3D11_MAP_READ, 0, &mapped);
-
-        cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
         
-        // Konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zur PNG passt
+        //Wir machen das hier damit der User das Fenster bewegen kann und wir immer wissen wo wir sind
+        int height = visualClient.ClientRect.bottom - visualClient.ClientRect.top; // Top und left sind 0 aber ich lasse es für Lesbarkeit erstmal drinnen, könnte bottom und right direkt in gameRect als width und height hinzufügen
+        int width = visualClient.ClientRect.right - visualClient.ClientRect.left;
+        GetClientRect(visualClient.game, &windowRect); // Wir holen nochmal Rect pro Frame um Fensterverschiebungen zu catchen
+        POINT window_start(windowRect.left, windowRect.top);
+        ClientToScreen(visualClient.game, &window_start);
+        gameRect = cv::Rect(window_start.x, window_start.y, width, height);
+
+        // Konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zur PNG passt und 
+        cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
         cv::cvtColor(screenshotBGRA, currentFrame, cv::COLOR_BGRA2BGR);
+
+        // Frame wurde bereits mit "currentFrame" in Memory geladen und wir können diesen nun sicher releasen
         dupli->ReleaseFrame();
         context->Unmap(cpuframe.get(), 0);
     }
@@ -127,8 +137,8 @@ struct visualSide{
         
         if (maxVal > 0.7) {
             POINT pp;
-            pp.x = p.x + (card.cols / 2); // Greift die Karte direkt in der Mitte. Sehr sus für Anti-Cheat
-            pp.y = p.y + (card.rows / 2);
+            pp.x = gameRect.x + (p.x + (card.cols / 2)); // Greift die Karte direkt in der Mitte. Sehr sus für Anti-Cheat
+            pp.y = gameRect.y + (p.y + (card.rows / 2));
             return pp;
         }
         else{
@@ -322,16 +332,24 @@ int main()
     automate bot(ygo);
     visualSide visual(ygo);
 
+
     //Bleibt in main fürs erste. Erstelle eigene struct später dafür    
-    cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/albaz.png");
+    cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Albaz4k.png");
     if (albaz.empty()) {
         std::cout << "Albaz nicht gefunden! ";
         return 1;
     }
-    cv::Mat albazklein = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/albazklein.png");
+    cv::Mat albazklein = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Albaz4k klein.png");
         if (albazklein.empty()) {
         std::cout << "Albazklein nicht gefunden! ";
         return 1;
+    }
+
+    double scale = ygo.ClientRect.bottom / Reference_Height;
+    if(std::abs(scale - 1.0) > 0.01){
+        // cv::Size dsize(lround(albaz.cols * scale), lround(albaz.rows * scale)); auch möglich.
+        // cv::resize(albaz, albaz, dsize, 0, 0, cv::INTER_AREA);
+        cv::resize(albaz, albaz, cv::Size(), scale, scale, cv::INTER_AREA);
     }
 
     while (true) {
