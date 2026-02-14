@@ -12,8 +12,16 @@
 #include "faktor.h"
 #include <print>
 #include <random>
+#include <algorithm>
+
+
+struct card{
+    cv::Mat mat;
+    const char* name;
+};
 
 double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
+
 
 struct ClientSide{
     HWND game;
@@ -127,6 +135,7 @@ struct visualSide{
     }
 
     std::optional<POINT> findCard(cv::Mat card){
+        updateFrame();
         cv::Mat result;
         cv::matchTemplate(currentFrame(gameRect), card, result, cv::TM_CCOEFF_NORMED);
 
@@ -154,16 +163,23 @@ struct automate{
     std::random_device rd;
     std::mt19937 gen;
     std::normal_distribution<double> pause;
-    std::uniform_int_distribution<int> magnet;
 
-    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(90, 10), magnet(-200, 200) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
+    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(90, 10) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
     
-    void mouse_move(POINT goal){ //die Variable T ist bisher noch nicht dynamisch, sprich für einen kurzen Weg senden wir genau so viele Inputs wie bei einem sehr langen Weg.
+    void mouse_move(POINT goal){
         POINT start;
         GetCursorPos(&start);
         POINT p1; // Magnet 1
         POINT p2; // Magnet 2
         POINT way;
+        
+        double distance = std::hypot((goal.x - start.x), (goal.y - start.y)); // Der Satz des Pythagoras gibt uns die Länge der Diagonale statt der Manhattan Distanz
+        double noise_limit = std::max(5.0, (distance * 0.15)); // wir haben bei einem kleinen Weg dann zumindest immer noch
+        double speed = 125;
+        double steps = 1.0 / std::max(10.0, (distance / speed));
+        std::normal_distribution<double> magnet(0, noise_limit / 3.0); // Ein dynamischer Magnet der sich der Länge der Strecke anpasst - du kannst bei einer Variable einfach "-" schreiben
+        // Achte darauf das ich doubles untereinander geschrieben habe um später SIMD Instruktionen zu ermöglichen ;)
+
         p1.x = start.x + ((goal.x - start.x) * 0.3) + magnet(gen);
         p1.y = start.y + ((goal.y - start.y) * 0.3) + magnet(gen);
         
@@ -172,7 +188,7 @@ struct automate{
         inputM.type = INPUT_MOUSE;
         inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     
-        for(double t = 0.0; t <= 1.0; t = t + 0.1){
+        for(double t = 0.0; t <= 1.0; t = t + steps){
             // Die Variablen werden niemals im RAM landen, Compiler versteht das die nur temp sind und schreibt sie direkt ins Register.
             const double u = 1 - t;
             const double tt = t * t;
@@ -183,11 +199,18 @@ struct automate{
             way.x = round(uuu * start.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * goal.x);
             way.y = round(uuu * start.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * goal.y);
             way = client.normalize(way);
+
             inputM.mi.dx = way.x;
-            inputM.mi.dy = way.y;
+            inputM.mi.dy = way.y;        
             SendInput(1, &inputM, sizeof(inputM));
             std::this_thread::sleep_for(std::chrono::milliseconds(15));
         }
+
+        // Am Ende rufen wir den genauen SendInput Pixel auf, T ist nun ein Double und manchmal ungenau!
+        goal = client.normalize(goal);
+        inputM.mi.dx = goal.x;
+        inputM.mi.dy = goal.y;
+        SendInput(1, &inputM, sizeof(inputM));
     }
     
     void click(POINT p){
@@ -266,7 +289,7 @@ struct automate{
    }
     }
 
-        void type_string_return(std::string_view s){ //selbe Funktion wie oben nur am Ende noch Enter. Erinnert mich an std::print() und std::println(). Nicht sicher ob das optimal ist..
+    void type_string_return(std::string_view s){ //selbe Funktion wie oben nur am Ende noch Enter. Erinnert mich an std::print() und std::println(). Nicht sicher ob das optimal ist..
         inputK.type = INPUT_KEYBOARD;
             for(char c : s){
                 SHORT checkKey = VkKeyScan(c);
@@ -322,7 +345,53 @@ struct automate{
 };
 
 
+struct ygo_bot{
+    automate& bot;
+    visualSide& visual;
+    ClientSide& ygo;
 
+    ygo_bot(automate& a, visualSide& v, ClientSide& c) : bot(a), visual(v), ygo(c){};
+
+    void card_out(cv::Mat card, POINT p){
+        bot.drag(p, ygo.get_UI_coordinates(UiTarget::out));
+    }
+
+
+    void card_in(card karte){
+        bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
+        bot.type_string_return(karte.name);
+        if(auto card = visual.findCard(karte.mat)){
+            bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
+        }
+        else{
+            POINT p;
+            bot.mouse_move(ygo.get_UI_coordinates(UiTarget::scrollbar));
+            POINT border;
+            border.x = visual.windowRect.right;
+            border.y = visual.windowRect.bottom; 
+            ClientToScreen(ygo.game, &border);
+            while(true){
+                //Else ist dann erstmal glaueb ich herausfinden ob wir mehr als clientside mit der Maus sind und wenn ja dann printe karte nicht gefunden und beende die suche. Andernfalls geh mit der Maus 1.1 runter und führ die funktion nochmal aus
+                GetCursorPos(&p);
+                if(p.y >= border.y){
+                    std::println("Karte nicht gefunden!");
+                    break;
+                }
+                
+                if(auto card = visual.findCard(karte.mat)){
+                    bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
+                    break;
+                }
+                else{
+                    POINT pp = p;
+                    p.y = p.y * 1.1;
+                    p.x = ygo.get_UI_coordinates(UiTarget::scrollbar).x;
+                    bot.drag(pp, p);
+                }
+            }}
+        }
+
+};
 
 int main()
 {
@@ -331,7 +400,7 @@ int main()
     ClientSide ygo(game);
     automate bot(ygo);
     visualSide visual(ygo);
-
+    ygo_bot maher(bot, visual, ygo);
 
     //Bleibt in main fürs erste. Erstelle eigene struct später dafür    
     cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Albaz4k.png");
@@ -339,11 +408,14 @@ int main()
         std::cout << "Albaz nicht gefunden! ";
         return 1;
     }
-    cv::Mat albazklein = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Albaz4k klein.png");
-        if (albazklein.empty()) {
+    cv::Mat kleinalbaz = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/albazversuch.png");
+        if (kleinalbaz.empty()) {
         std::cout << "Albazklein nicht gefunden! ";
         return 1;
     }
+
+    card card_albaz(albaz, "Fallen of Albaz");
+    card klein_albaz(kleinalbaz, "Fallen of Albaz");
 
     double scale = ygo.ClientRect.bottom / Reference_Height;
     if(std::abs(scale - 1.0) > 0.01){
@@ -353,13 +425,12 @@ int main()
     }
 
     while (true) {
-        visual.updateFrame();
-        if (auto card = visual.findCard(albaz)) {
-            bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::out));
+         if (auto card = visual.findCard(albaz)) {
+            maher.card_out(albaz, card.value());
         }
         else{
-            bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
-            bot.type_string_return("Fallen of Albaz");
+            maher.card_in(klein_albaz);
         }
-    }
+        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+}
 }
