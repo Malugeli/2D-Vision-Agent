@@ -14,14 +14,18 @@
 #include <random>
 #include <algorithm>
 
-
-struct card{
-    cv::Mat mat;
-    const char* name;
-};
-
 double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
 
+struct card{
+    cv::Mat deck;
+    cv::Mat editor;
+    std::string_view name;
+};
+
+struct deck_entry{
+    int count;
+    card card;
+};
 
 struct ClientSide{
     HWND game;
@@ -80,7 +84,10 @@ struct visualSide{
     DXGI_OUTDUPL_FRAME_INFO frameinfo;
     cv::Mat currentFrame;
     cv::Rect gameRect;
+    cv::Rect deckRect;
+    cv::Rect editorRect;
     RECT windowRect;
+
 
 
     visualSide(ClientSide& client) : visualClient(client){
@@ -94,6 +101,21 @@ struct visualSide{
         // erster Frame ist Fehlerhaft. Wir löschen ihn direkt wieder
         THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
         dupli->ReleaseFrame();
+
+        POINT deck_start = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::deck_Begin)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::deck_Begin)).y)};
+        POINT deck_end = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::deck_End)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::deck_End)).y)};
+        int deck_width = deck_end.x - deck_start.x;
+        int deck_height = deck_end.y - deck_start.y; 
+        
+        cv::Rect deckRect(deck_start.x, deck_start.y, deck_width, deck_height);
+        
+        
+        POINT editor_start = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::editor_Begin)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::editor_Begin)).y)};
+        POINT editor_end = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::editor_End)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::editor_End)).y)};
+        int editor_width = editor_end.x - editor_start.x;
+        int editor_height = editor_end.y - editor_start.y; 
+        
+        cv::Rect editorRect(editor_start.x, editor_start.y, editor_width, editor_height);
 
     }
     
@@ -120,8 +142,8 @@ struct visualSide{
         //Wir machen das hier damit der User das Fenster bewegen kann und wir immer wissen wo wir sind
         int height = visualClient.ClientRect.bottom - visualClient.ClientRect.top; // Top und left sind 0 aber ich lasse es für Lesbarkeit erstmal drinnen, könnte bottom und right direkt in gameRect als width und height hinzufügen
         int width = visualClient.ClientRect.right - visualClient.ClientRect.left;
-        GetClientRect(visualClient.game, &windowRect); // Wir holen nochmal Rect pro Frame um Fensterverschiebungen zu catchen
-        POINT window_start(windowRect.left, windowRect.top);
+        GetClientRect(visualClient.game, &windowRect); // Wir holen nochmal Rect pro Frame um Fensterverschiebungen zu catchen ABER ich glaube ich brauche das nicht. ClientToScreen hätte ausgereicht oder?
+        POINT window_start(windowRect.left, windowRect.top); //stand jetzt ist das 0/0
         ClientToScreen(visualClient.game, &window_start);
         gameRect = cv::Rect(window_start.x, window_start.y, width, height);
 
@@ -132,12 +154,20 @@ struct visualSide{
         // Frame wurde bereits mit "currentFrame" in Memory geladen und wir können diesen nun sicher releasen
         dupli->ReleaseFrame();
         context->Unmap(cpuframe.get(), 0);
+
     }
 
-    std::optional<POINT> findCard(cv::Mat card){
+    std::optional<POINT> findCard(cv::Mat card, cv::Rect roi = cv::Rect()){
         updateFrame();
+        // if(roi.x == 0 && roi.y == 0 && roi.width == 0 && roi.height == 0){ hätte ich gemacht
+        //     roi = gameRect;  
+        // }
+
+        if(roi.empty()){
+            roi = gameRect;
+        }
         cv::Mat result;
-        cv::matchTemplate(currentFrame(gameRect), card, result, cv::TM_CCOEFF_NORMED);
+        cv::matchTemplate(currentFrame(roi), card, result, cv::TM_CCOEFF_NORMED);
 
         double minVal;
         double maxVal;
@@ -360,32 +390,32 @@ struct ygo_bot{
     void card_in(card karte){
         bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
         bot.type_string_return(karte.name);
-        if(auto card = visual.findCard(karte.mat)){
+        if(auto card = visual.findCard(karte.editor)){
             bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
         }
         else{
             POINT p;
             bot.mouse_move(ygo.get_UI_coordinates(UiTarget::scrollbar));
+            int searchx = ygo.get_UI_coordinates(UiTarget::scrollbar).x; // durch die Bezierkurve rutscht x manchmal aus der Searchbar 
             POINT border;
             border.x = visual.windowRect.right;
             border.y = visual.windowRect.bottom; 
             ClientToScreen(ygo.game, &border);
             while(true){
-                //Else ist dann erstmal glaueb ich herausfinden ob wir mehr als clientside mit der Maus sind und wenn ja dann printe karte nicht gefunden und beende die suche. Andernfalls geh mit der Maus 1.1 runter und führ die funktion nochmal aus
                 GetCursorPos(&p);
                 if(p.y >= border.y){
                     std::println("Karte nicht gefunden!");
                     break;
                 }
                 
-                if(auto card = visual.findCard(karte.mat)){
+                if(auto card = visual.findCard(karte.editor)){
                     bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
                     break;
                 }
                 else{
                     POINT pp = p;
                     p.y = p.y * 1.1;
-                    p.x = ygo.get_UI_coordinates(UiTarget::scrollbar).x;
+                    p.x = searchx;
                     bot.drag(pp, p);
                 }
             }}
@@ -393,8 +423,40 @@ struct ygo_bot{
 
 };
 
+struct deck_loader{ // das ist der Endgegner. Danach sind wir wirklich fertig mit dem Projekt!
+    ClientSide& client;
+    cv::Rect deckRect;
+    cv::Rect editorRect;
+    double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
+
+
+    deck_loader(ClientSide& c) : client(c){
+        POINT deck_start = {(client.ClientRect.right * client.get_UI_coordinates((UiTarget::deck_Begin)).x), (client.ClientRect.bottom * client.get_UI_coordinates((UiTarget::deck_Begin)).y)};
+        POINT deck_end = {(client.ClientRect.right * client.get_UI_coordinates((UiTarget::deck_End)).x), (client.ClientRect.bottom * client.get_UI_coordinates((UiTarget::deck_End)).y)};
+        int deck_width = deck_end.x - deck_start.x;
+        int deck_height = deck_end.y - deck_start.y; 
+        
+        cv::Rect deckRect(deck_start.x, deck_start.y, deck_width, deck_height);
+        
+        
+        POINT editor_start = {(client.ClientRect.right * client.get_UI_coordinates((UiTarget::editor_Begin)).x), (client.ClientRect.bottom * client.get_UI_coordinates((UiTarget::editor_Begin)).y)};
+        POINT editor_end = {(client.ClientRect.right * client.get_UI_coordinates((UiTarget::editor_End)).x), (client.ClientRect.bottom * client.get_UI_coordinates((UiTarget::editor_End)).y)};
+        int editor_width = editor_end.x - editor_start.x;
+        int editor_height = editor_end.y - editor_start.y; 
+        
+        cv::Rect editorRect(editor_start.x, editor_start.y, editor_width, editor_height);
+
+
+    };
+    
+};
+
 int main()
 {
+    // Ich will was testen: 
+    // Wenn ich mehrere Decks habe die geladen werden können, möchte ich das wir per UI fragen können UND
+    // einmal eine Version wo wir das Args benutzen. Das Projekt ist niemals fertig!! 😈
+
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     HWND game = FindWindow(NULL, "masterduel");
     ClientSide ygo(game);
@@ -414,23 +476,41 @@ int main()
         return 1;
     }
 
-    card card_albaz(albaz, "Fallen of Albaz");
-    card klein_albaz(kleinalbaz, "Fallen of Albaz");
-
-    double scale = ygo.ClientRect.bottom / Reference_Height;
-    if(std::abs(scale - 1.0) > 0.01){
-        // cv::Size dsize(lround(albaz.cols * scale), lround(albaz.rows * scale)); auch möglich.
-        // cv::resize(albaz, albaz, dsize, 0, 0, cv::INTER_AREA);
+    
+    double scale = ygo.ClientRect.bottom / Reference_Height; // Scalen per Height weil Widescreenmonitore existieren
+    if(std::abs(scale - 1.0) > 0.01){ // bei double niemals != 1.0 machen da Epsilontoleranz
         cv::resize(albaz, albaz, cv::Size(), scale, scale, cv::INTER_AREA);
     }
 
+    card carde{.deck = albaz, .editor = kleinalbaz, .name = "Fallen of Albaz"};
+
     while (true) {
-         if (auto card = visual.findCard(albaz)) {
-            maher.card_out(albaz, card.value());
+         if (auto card = visual.findCard(carde.deck)) {
+            maher.card_out(carde.deck, card.value());
         }
         else{
-            maher.card_in(klein_albaz);
+            maher.card_in(carde);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(600));
 }
 }
+
+// TODO 
+// Ich muss den ROI Region of interest verbessern für die Suche ob es im Deck oder Deck Editor ist.
+// Ich muss einstellen dass die Karten öfters im Deck auftauchen können.
+// Ich muss die card struct verändern das sie zwei cv::mats aufnimmt. Einmal die Deck und einmal die Editor Karte.
+// Designated Initializer = .deck_karte = blabla, .editor_karte = dadada
+
+
+
+// REGION OF INTEREST BERECHNUNG
+// Deck ROI 502/216 - 1285/1006
+
+// Editor ROI 1319/313 - 1858/1007
+
+// ROI DECK X = 502/1923 - 1285/1923 ----- gamerect.right * 0.26 -  gamerect.right * 0.67
+// ROI DECK Y = 216/1081 - 1006/1081 ----- gamerect.bottom * 0,19 - gamerect.bottom * 0,94
+
+
+// Editor ROI x = 1319/1923 - 1858/1923 gamerect.right * 0.68 - gamrect.right * 0,97
+// Editor ROI Y = 313/1081  - 1007/1081 gamerect.bottom * 0.28 - gamerect. bottom * * 0.94
