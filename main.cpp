@@ -87,6 +87,12 @@ struct visualSide{
     cv::Rect deckRect;
     cv::Rect editorRect;
     RECT windowRect;
+    enum class ROI : uint8_t{
+        deck,
+        editor,
+        all
+    };
+    
 
 
 
@@ -102,20 +108,7 @@ struct visualSide{
         THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
         dupli->ReleaseFrame();
 
-        POINT deck_start = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::deck_Begin)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::deck_Begin)).y)};
-        POINT deck_end = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::deck_End)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::deck_End)).y)};
-        int deck_width = deck_end.x - deck_start.x;
-        int deck_height = deck_end.y - deck_start.y; 
         
-        cv::Rect deckRect(deck_start.x, deck_start.y, deck_width, deck_height);
-        
-        
-        POINT editor_start = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::editor_Begin)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::editor_Begin)).y)};
-        POINT editor_end = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::editor_End)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::editor_End)).y)};
-        int editor_width = editor_end.x - editor_start.x;
-        int editor_height = editor_end.y - editor_start.y; 
-        
-        cv::Rect editorRect(editor_start.x, editor_start.y, editor_width, editor_height);
 
     }
     
@@ -146,6 +139,24 @@ struct visualSide{
         POINT window_start(windowRect.left, windowRect.top); //stand jetzt ist das 0/0
         ClientToScreen(visualClient.game, &window_start);
         gameRect = cv::Rect(window_start.x, window_start.y, width, height);
+        
+        POINT ClientEnd(windowRect.right, windowRect.bottom);
+        ClientToScreen(visualClient.game, &ClientEnd);
+
+        POINT deck_start = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::deck_Begin)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::deck_Begin)).y)};
+        POINT deck_end = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::deck_End)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::deck_End)).y)};
+        int deck_width = deck_end.x - deck_start.x;
+        int deck_height = deck_end.y - deck_start.y; 
+        
+        deckRect = cv::Rect(deck_start.x, deck_start.y, deck_width, deck_height);
+        
+        
+        POINT editor_start = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::editor_Begin)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::editor_Begin)).y)};
+        POINT editor_end = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::editor_End)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::editor_End)).y)};
+        int editor_width = editor_end.x - editor_start.x;
+        int editor_height = editor_end.y - editor_start.y; 
+        
+        editorRect = cv::Rect(editor_start.x, editor_start.y, editor_width, editor_height);
 
         // Konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zur PNG passt und 
         cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
@@ -154,20 +165,25 @@ struct visualSide{
         // Frame wurde bereits mit "currentFrame" in Memory geladen und wir können diesen nun sicher releasen
         dupli->ReleaseFrame();
         context->Unmap(cpuframe.get(), 0);
-
     }
 
-    std::optional<POINT> findCard(cv::Mat card, cv::Rect roi = cv::Rect()){
+    std::optional<POINT> findCard(cv::Mat card, ROI roi = ROI::all){
         updateFrame();
-        // if(roi.x == 0 && roi.y == 0 && roi.width == 0 && roi.height == 0){ hätte ich gemacht
-        //     roi = gameRect;  
-        // }
-
-        if(roi.empty()){
-            roi = gameRect;
-        }
         cv::Mat result;
-        cv::matchTemplate(currentFrame(roi), card, result, cv::TM_CCOEFF_NORMED);
+
+        switch(roi){
+            case ROI::all:
+            cv::matchTemplate(currentFrame(gameRect), card, result, cv::TM_CCOEFF_NORMED);
+            break;
+
+            case ROI::deck:
+            cv::matchTemplate(currentFrame(deckRect), card, result, cv::TM_CCOEFF_NORMED);
+            break;
+
+            case ROI::editor:
+            cv::matchTemplate(currentFrame(editorRect), card, result, cv::TM_CCOEFF_NORMED);
+            break;
+        }
 
         double minVal;
         double maxVal;
@@ -423,7 +439,7 @@ struct ygo_bot{
 
 };
 
-struct deck_loader{ // das ist der Endgegner. Danach sind wir wirklich fertig mit dem Projekt!
+struct deck_loader{ 
     ClientSide& client;
     cv::Rect deckRect;
     cv::Rect editorRect;
@@ -495,22 +511,25 @@ int main()
 }
 }
 
-// TODO 
-// Ich muss den ROI Region of interest verbessern für die Suche ob es im Deck oder Deck Editor ist.
-// Ich muss einstellen dass die Karten öfters im Deck auftauchen können.
-// Ich muss die card struct verändern das sie zwei cv::mats aufnimmt. Einmal die Deck und einmal die Editor Karte.
-// Designated Initializer = .deck_karte = blabla, .editor_karte = dadada
+
+/*
+TODO 
+Ich muss den ROI Region of interest verbessern für die Suche ob es im Deck oder Deck Editor ist.
+Ich muss einstellen dass die Karten öfters im Deck auftauchen können.
+Ich muss die card struct verändern das sie zwei cv::mats aufnimmt. Einmal die Deck und einmal die Editor Karte.
+Designated Initializer = .deck_karte = blabla, .editor_karte = dadada
 
 
 
-// REGION OF INTEREST BERECHNUNG
-// Deck ROI 502/216 - 1285/1006
+REGION OF INTEREST BERECHNUNG
+Deck ROI 502/216 - 1285/1006
 
-// Editor ROI 1319/313 - 1858/1007
+Editor ROI 1319/313 - 1858/1007
 
-// ROI DECK X = 502/1923 - 1285/1923 ----- gamerect.right * 0.26 -  gamerect.right * 0.67
-// ROI DECK Y = 216/1081 - 1006/1081 ----- gamerect.bottom * 0,19 - gamerect.bottom * 0,94
+ROI DECK X = 502/1923 - 1285/1923 ----- gamerect.right * 0.26 -  gamerect.right * 0.67
+ROI DECK Y = 216/1081 - 1006/1081 ----- gamerect.bottom * 0,19 - gamerect.bottom * 0,94
 
 
-// Editor ROI x = 1319/1923 - 1858/1923 gamerect.right * 0.68 - gamrect.right * 0,97
-// Editor ROI Y = 313/1081  - 1007/1081 gamerect.bottom * 0.28 - gamerect. bottom * * 0.94
+Editor ROI x = 1319/1923 - 1858/1923 gamerect.right * 0.68 - gamrect.right * 0,97
+Editor ROI Y = 313/1081  - 1007/1081 gamerect.bottom * 0.28 - gamerect. bottom * * 0.94
+*/
