@@ -416,8 +416,8 @@ struct ygo_bot{
             bot.mouse_move(ygo.get_UI_coordinates(UiTarget::scrollbar));
             int searchx = ygo.get_UI_coordinates(UiTarget::scrollbar).x; // durch die Bezierkurve rutscht x manchmal aus der Searchbar 
             POINT border;
-            border.x = visual.windowRect.right;
-            border.y = visual.windowRect.bottom; 
+            border.x = ygo.ClientRect.right;
+            border.y = ygo.ClientRect.bottom; 
             ClientToScreen(ygo.game, &border);
             while(true){
                 GetCursorPos(&p);
@@ -446,11 +446,14 @@ struct ygo_bot{
             card carde;
 
             for(int i = 0; i < dracotail.size(); ++i){
+            
+            std::println("Suche Karte im Deck mit Path: {}", dracotail[i].deck_path);
             cv::Mat deck = cv::imread(static_cast<std::string>(dracotail[i].deck_path));
             if (deck.empty()) {
                 std::cout << "Karte nicht gefunden! ";
                 return false;
             }
+            std::println("Suche Karte im Editor mit Path: {}", dracotail[i].editor_path);
             cv::Mat editor = cv::imread(static_cast<std::string>(dracotail[i].editor_path));
                 if (editor.empty()) {
                 std::cout << "Editorkarte nicht gefunden! ";
@@ -461,23 +464,17 @@ struct ygo_bot{
             double scale = ygo.ClientRect.bottom / Reference_Height; // Scalen per Height weil Widescreenmonitore existieren
             if(std::abs(scale - 1.0) > 0.01){ // bei double niemals != 1.0 machen da Epsilontoleranz
                 cv::resize(deck, deck, cv::Size(), scale, scale, cv::INTER_AREA);
+                cv::resize(editor, editor, cv::Size(), scale, scale, cv::INTER_AREA);
             }
+
+
 
             carde = {.deck = deck, .editor = editor, .name = dracotail[i].name};
 
-
-
-            while (true) {
-                if (auto card = visual.findCard(carde.deck)) {
-                    card_out(carde.deck, card.value());
-                }
-                else{
-                    card_in(carde);
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(600));
+            card_in(carde);
+            std::this_thread::sleep_for(std::chrono::milliseconds(600));
             }
         }
-}
 };
 
 int main()
@@ -493,37 +490,7 @@ int main()
     visualSide visual(ygo);
     ygo_bot ygobot(bot, visual, ygo);
 
-    //Bleibt in main fürs erste. Erstelle eigene struct später dafür    
-    cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Albaz4k.png");
-    if (albaz.empty()) {
-        std::cout << "Albaz nicht gefunden! ";
-        return 1;
-    }
-    cv::Mat kleinalbaz = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/albazversuch.png");
-        if (kleinalbaz.empty()) {
-        std::cout << "Albazklein nicht gefunden! ";
-        return 1;
-    }
-
-    
-    double scale = ygo.ClientRect.bottom / Reference_Height; // Scalen per Height weil Widescreenmonitore existieren
-    if(std::abs(scale - 1.0) > 0.01){ // bei double niemals != 1.0 machen da Epsilontoleranz
-        cv::resize(albaz, albaz, cv::Size(), scale, scale, cv::INTER_AREA);
-    }
-
-    card carde{.deck = albaz, .editor = kleinalbaz, .name = "Fallen of Albaz"};
-
-
-
-    while (true) {
-         if (auto card = visual.findCard(carde.deck)) {
-            ygobot.card_out(carde.deck, card.value());
-        }
-        else{
-            ygobot.card_in(carde);
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(600));
-}
+    ygobot.deck_load(); 
 }
 
 
