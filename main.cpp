@@ -9,10 +9,12 @@
 #include <wil/com.h>
 #include <opencv2/opencv.hpp>
 #include <string>
-#include "faktor.h"
 #include <print>
 #include <random>
 #include <algorithm>
+#include <span>
+#include "faktor.h"
+#include "deck.h"
 
 double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
 
@@ -20,6 +22,7 @@ struct card{
     cv::Mat deck;
     cv::Mat editor;
     std::string_view name;
+    uint8_t amount;
 };
 
 struct deck_entry{
@@ -86,6 +89,7 @@ struct visualSide{
     cv::Rect gameRect;
     cv::Rect deckRect;
     cv::Rect editorRect;
+    cv::Mat result;
     RECT windowRect;
     enum class ROI : uint8_t{
         deck,
@@ -132,27 +136,27 @@ struct visualSide{
         D3D11_MAPPED_SUBRESOURCE mapped;
         context->Map(cpuframe.get(), 0, D3D11_MAP_READ, 0, &mapped);
         
-        //Wir machen das hier damit der User das Fenster bewegen kann und wir immer wissen wo wir sind
-        int height = visualClient.ClientRect.bottom - visualClient.ClientRect.top; // Top und left sind 0 aber ich lasse es für Lesbarkeit erstmal drinnen, könnte bottom und right direkt in gameRect als width und height hinzufügen
-        int width = visualClient.ClientRect.right - visualClient.ClientRect.left;
-        GetClientRect(visualClient.game, &windowRect); // Wir holen nochmal Rect pro Frame um Fensterverschiebungen zu catchen ABER ich glaube ich brauche das nicht. ClientToScreen hätte ausgereicht oder?
-        POINT window_start(windowRect.left, windowRect.top); //stand jetzt ist das 0/0
-        ClientToScreen(visualClient.game, &window_start);
-        gameRect = cv::Rect(window_start.x, window_start.y, width, height);
-        
-        POINT ClientEnd(windowRect.right, windowRect.bottom);
-        ClientToScreen(visualClient.game, &ClientEnd);
 
-        POINT deck_start = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::deck_Begin)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::deck_Begin)).y)};
-        POINT deck_end = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::deck_End)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::deck_End)).y)};
+
+        //Wir machen das hier damit der User das Fenster bewegen kann und wir immer die richtigen Stellen abschneiden.
+    
+        //Game Rect
+        POINT window_start{0, 0};
+        ClientToScreen(visualClient.game, &window_start);
+        gameRect = cv::Rect(window_start.x, window_start.y, visualClient.ClientRect.right, visualClient.ClientRect.bottom);
+        
+
+        //Deck Rect
+        POINT deck_start = visualClient.get_UI_coordinates(UiTarget::deck_Begin);
+        POINT deck_end = visualClient.get_UI_coordinates(UiTarget::deck_End);
         int deck_width = deck_end.x - deck_start.x;
         int deck_height = deck_end.y - deck_start.y; 
         
         deckRect = cv::Rect(deck_start.x, deck_start.y, deck_width, deck_height);
         
-        
-        POINT editor_start = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::editor_Begin)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::editor_Begin)).y)};
-        POINT editor_end = {(windowRect.right * visualClient.get_UI_coordinates((UiTarget::editor_End)).x), (windowRect.bottom * visualClient.get_UI_coordinates((UiTarget::editor_End)).y)};
+        //Editor Rect
+        POINT editor_start = visualClient.get_UI_coordinates(UiTarget::editor_Begin);
+        POINT editor_end = visualClient.get_UI_coordinates(UiTarget::editor_End);
         int editor_width = editor_end.x - editor_start.x;
         int editor_height = editor_end.y - editor_start.y; 
         
@@ -169,7 +173,6 @@ struct visualSide{
 
     std::optional<POINT> findCard(cv::Mat card, ROI roi = ROI::all){
         updateFrame();
-        cv::Mat result;
 
         switch(roi){
             case ROI::all:
@@ -390,7 +393,6 @@ struct automate{
     }
 };
 
-
 struct ygo_bot{
     automate& bot;
     visualSide& visual;
@@ -437,34 +439,45 @@ struct ygo_bot{
             }}
         }
 
-};
-
-struct deck_loader{ 
-    ClientSide& client;
-    cv::Rect deckRect;
-    cv::Rect editorRect;
-    double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
 
 
-    deck_loader(ClientSide& c) : client(c){
-        POINT deck_start = {(client.ClientRect.right * client.get_UI_coordinates((UiTarget::deck_Begin)).x), (client.ClientRect.bottom * client.get_UI_coordinates((UiTarget::deck_Begin)).y)};
-        POINT deck_end = {(client.ClientRect.right * client.get_UI_coordinates((UiTarget::deck_End)).x), (client.ClientRect.bottom * client.get_UI_coordinates((UiTarget::deck_End)).y)};
-        int deck_width = deck_end.x - deck_start.x;
-        int deck_height = deck_end.y - deck_start.y; 
-        
-        cv::Rect deckRect(deck_start.x, deck_start.y, deck_width, deck_height);
-        
-        
-        POINT editor_start = {(client.ClientRect.right * client.get_UI_coordinates((UiTarget::editor_Begin)).x), (client.ClientRect.bottom * client.get_UI_coordinates((UiTarget::editor_Begin)).y)};
-        POINT editor_end = {(client.ClientRect.right * client.get_UI_coordinates((UiTarget::editor_End)).x), (client.ClientRect.bottom * client.get_UI_coordinates((UiTarget::editor_End)).y)};
-        int editor_width = editor_end.x - editor_start.x;
-        int editor_height = editor_end.y - editor_start.y; 
-        
-        cv::Rect editorRect(editor_start.x, editor_start.y, editor_width, editor_height);
+    bool deck_load(){
+            double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
+            card carde;
+
+            for(int i = 0; i < dracotail.size(); ++i){
+            cv::Mat deck = cv::imread(static_cast<std::string>(dracotail[i].deck_path));
+            if (deck.empty()) {
+                std::cout << "Karte nicht gefunden! ";
+                return false;
+            }
+            cv::Mat editor = cv::imread(static_cast<std::string>(dracotail[i].editor_path));
+                if (editor.empty()) {
+                std::cout << "Editorkarte nicht gefunden! ";
+                return false;
+            }
 
 
-    };
-    
+            double scale = ygo.ClientRect.bottom / Reference_Height; // Scalen per Height weil Widescreenmonitore existieren
+            if(std::abs(scale - 1.0) > 0.01){ // bei double niemals != 1.0 machen da Epsilontoleranz
+                cv::resize(deck, deck, cv::Size(), scale, scale, cv::INTER_AREA);
+            }
+
+            carde = {.deck = deck, .editor = editor, .name = dracotail[i].name};
+
+
+
+            while (true) {
+                if (auto card = visual.findCard(carde.deck)) {
+                    card_out(carde.deck, card.value());
+                }
+                else{
+                    card_in(carde);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(600));
+            }
+        }
+}
 };
 
 int main()
@@ -478,7 +491,7 @@ int main()
     ClientSide ygo(game);
     automate bot(ygo);
     visualSide visual(ygo);
-    ygo_bot maher(bot, visual, ygo);
+    ygo_bot ygobot(bot, visual, ygo);
 
     //Bleibt in main fürs erste. Erstelle eigene struct später dafür    
     cv::Mat albaz = cv::imread("C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Albaz4k.png");
@@ -500,12 +513,14 @@ int main()
 
     card carde{.deck = albaz, .editor = kleinalbaz, .name = "Fallen of Albaz"};
 
+
+
     while (true) {
          if (auto card = visual.findCard(carde.deck)) {
-            maher.card_out(carde.deck, card.value());
+            ygobot.card_out(carde.deck, card.value());
         }
         else{
-            maher.card_in(carde);
+            ygobot.card_in(carde);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(600));
 }
@@ -533,3 +548,72 @@ ROI DECK Y = 216/1081 - 1006/1081 ----- gamerect.bottom * 0,19 - gamerect.bottom
 Editor ROI x = 1319/1923 - 1858/1923 gamerect.right * 0.68 - gamrect.right * 0,97
 Editor ROI Y = 313/1081  - 1007/1081 gamerect.bottom * 0.28 - gamerect. bottom * * 0.94
 */
+
+/*
+Ok die Funktion die wir schreiben literally macht alles weil das nicht viel ist. Die einzige Sache die ich sagen könnte wäre reade und resize aber das kann sogar in der loop passieren 
+dafür brauche ich keine neue Funktion.
+
+Sprich was passieren soll ist -> Output ist void oder bool wenn alles klappt und input ist ein std::array was das deck ist.
+
+Reference Height ist dann der erste variable und ansonsten brauchen wir nichts außer die sachen dir wir gerade soweiso mit albaz machen. ALLES was wir mit Albaz gerade machen, machen wir einfach in der Loop
+der Funktion.
+*/
+
+
+// struct deck_loader{ 
+//     ClientSide& client;
+//     visualSide& visual;
+//     ygo_bot& ygobot;
+//     double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
+//     card carde;
+    
+
+
+//     bool deck_load(){
+//     for(int i = 0; i < dracotail.size(); ++i){
+//         cv::Mat deck = cv::imread(static_cast<std::string>(dracotail[i].deck_path));
+//         if (deck.empty()) {
+//             std::cout << "Karte nicht gefunden! ";
+//             return false;
+//         }
+//         cv::Mat editor = cv::imread(static_cast<std::string>(dracotail[i].editor_path));
+//             if (editor.empty()) {
+//             std::cout << "Editorkarte nicht gefunden! ";
+//             return false;
+//         }
+
+
+//         double scale = client.ClientRect.bottom / Reference_Height; // Scalen per Height weil Widescreenmonitore existieren
+//         if(std::abs(scale - 1.0) > 0.01){ // bei double niemals != 1.0 machen da Epsilontoleranz
+//             cv::resize(deck, deck, cv::Size(), scale, scale, cv::INTER_AREA);
+//         }
+
+//         carde = {.deck = deck, .editor = editor, .name = dracotail[i].name};
+
+
+
+//         while (true) {
+//                 if (auto card = visual.findCard(carde.deck)) {
+//                 ygobot.card_out(carde.deck, card.value());
+//             }
+//             else{
+//                 ygobot.card_in(carde);
+//             }
+//             std::this_thread::sleep_for(std::chrono::milliseconds(600));
+//         }
+//     }
+// };
+
+
+    /*
+    Ok das Deck ist erstellt. Die Idee ist das wir niemals mehr als ein cv::Mat eigentlich da haben, da wir eigentlich nur die Deckliste in einer Loop abarbeiten,
+    die wir in deck.h haben.
+    Sprich wenn das Programm aktuell läuft, führen wir eine forloop aus die x mal durchläuft wo x die Größe des Deckarrays ist.
+    Die Frage ist, werden wir..
+
+    Ich glaube ich brauche die Klasse hier nicht, ich brauche nur eine Funktion die ein std::array als Input nimmt und dann ist das nur eine loop.
+    Das alles was wir dann mit resize machen etc kann die Funktion machen. Das ist nur "optional"
+    */
+
+
+    // };
