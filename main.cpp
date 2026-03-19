@@ -1,3 +1,9 @@
+/*
+TODO: 
+- Amount hinkriegen
+- Fragen welches Deck er haben will
+*/
+
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -16,18 +22,12 @@
 #include "faktor.h"
 #include "deck.h"
 
-double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
 
 struct card{
     cv::Mat deck;
     cv::Mat editor;
     std::string_view name;
     uint8_t amount;
-};
-
-struct deck_entry{
-    int count;
-    card card;
 };
 
 struct ClientSide{
@@ -406,8 +406,13 @@ struct ygo_bot{
 
 
     void card_in(card karte){
+        if(auto card = visual.findCard(karte.editor))
+        {
+            bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
+        }
         bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
         bot.type_string_return(karte.name);
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
         if(auto card = visual.findCard(karte.editor)){
             bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
         }
@@ -446,34 +451,29 @@ struct ygo_bot{
             card carde;
 
             for(int i = 0; i < dracotail.size(); ++i){
-            
-            std::println("Suche Karte im Deck mit Path: {}", dracotail[i].deck_path);
-            cv::Mat deck = cv::imread(static_cast<std::string>(dracotail[i].deck_path));
-            if (deck.empty()) {
-                std::cout << "Karte nicht gefunden! ";
-                return false;
-            }
-            std::println("Suche Karte im Editor mit Path: {}", dracotail[i].editor_path);
-            cv::Mat editor = cv::imread(static_cast<std::string>(dracotail[i].editor_path));
-                if (editor.empty()) {
-                std::cout << "Editorkarte nicht gefunden! ";
-                return false;
-            }
-
-
-            double scale = ygo.ClientRect.bottom / Reference_Height; // Scalen per Height weil Widescreenmonitore existieren
-            if(std::abs(scale - 1.0) > 0.01){ // bei double niemals != 1.0 machen da Epsilontoleranz
-                cv::resize(deck, deck, cv::Size(), scale, scale, cv::INTER_AREA);
-                cv::resize(editor, editor, cv::Size(), scale, scale, cv::INTER_AREA);
-            }
-
-
-
-            carde = {.deck = deck, .editor = editor, .name = dracotail[i].name};
-
-            card_in(carde);
-            std::this_thread::sleep_for(std::chrono::milliseconds(600));
-            }
+                cv::Mat deck = cv::imread(static_cast<std::string>(dracotail[i].deck_path));
+                if (deck.empty()) {
+                    std::cout << "Karte nicht gefunden! ";
+                    return false;
+                }
+                cv::Mat editor = cv::imread(static_cast<std::string>(dracotail[i].editor_path));
+                    if (editor.empty()) {
+                    std::cout << "Editorkarte nicht gefunden! ";
+                    return false;
+                }
+                double scale = ygo.ClientRect.bottom / Reference_Height; // Scalen per Height weil Widescreenmonitore existieren
+                if(std::abs(scale - 1.0) > 0.01){ // bei double niemals != 1.0 machen da Epsilontoleranz
+                    cv::resize(deck, deck, cv::Size(), scale, scale, cv::INTER_AREA);
+                    cv::resize(editor, editor, cv::Size(), scale, scale, cv::INTER_AREA);
+                }
+                carde = {.deck = deck, .editor = editor, .name = dracotail[i].name};
+                for(int j = 0; j < dracotail[i].amount; ++j)
+                {
+                    card_in(carde);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                }
+        }
+        return true;
         }
 };
 
