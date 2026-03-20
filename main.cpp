@@ -1,6 +1,6 @@
 /*
 TODO: 
-- Amount hinkriegen
+- Amount hinkriegen // obsolet da wir immer mit neuem Deck arbeiten. Unrealistisch das der Bot ein vorhandenes Deck bearbeiten würde und sehr ineffizient.
 - Fragen welches Deck er haben will
 */
 
@@ -410,39 +410,40 @@ struct ygo_bot{
         {
             bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
         }
-        bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
-        bot.type_string_return(karte.name);
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-        if(auto card = visual.findCard(karte.editor)){
-            bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
-        }
-        else{
-            POINT p;
-            bot.mouse_move(ygo.get_UI_coordinates(UiTarget::scrollbar));
-            int searchx = ygo.get_UI_coordinates(UiTarget::scrollbar).x; // durch die Bezierkurve rutscht x manchmal aus der Searchbar 
-            POINT border;
-            border.x = ygo.ClientRect.right;
-            border.y = ygo.ClientRect.bottom; 
-            ClientToScreen(ygo.game, &border);
-            while(true){
-                GetCursorPos(&p);
-                if(p.y >= border.y){
-                    std::println("Karte nicht gefunden!");
-                    break;
-                }
-                
-                if(auto card = visual.findCard(karte.editor)){
-                    bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
-                    break;
-                }
-                else{
-                    POINT pp = p;
-                    p.y = p.y * 1.1;
-                    p.x = searchx;
-                    bot.drag(pp, p);
-                }
+        else
+    {        bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
+            bot.type_string_return(karte.name);
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            if(auto card = visual.findCard(karte.editor)){
+                bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
+            }
+            else{
+                POINT p;
+                bot.mouse_move(ygo.get_UI_coordinates(UiTarget::scrollbar));
+                int searchx = ygo.get_UI_coordinates(UiTarget::scrollbar).x; // durch die Bezierkurve rutscht x manchmal aus der Searchbar 
+                POINT border;
+                border.x = ygo.ClientRect.right;
+                border.y = ygo.ClientRect.bottom; 
+                ClientToScreen(ygo.game, &border);
+                while(true){
+                    GetCursorPos(&p);
+                    if(p.y >= border.y){
+                        std::println("Karte nicht gefunden!");
+                        break;
+                    }
+                    
+                    if(auto card = visual.findCard(karte.editor)){
+                        bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
+                        break;
+                    }
+                    else{
+                        POINT pp = p;
+                        p.y = p.y * 1.1;
+                        p.x = searchx;
+                        bot.drag(pp, p);
+                    }
+                }}
             }}
-        }
 
 
 
