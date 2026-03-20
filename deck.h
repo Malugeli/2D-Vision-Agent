@@ -10,7 +10,7 @@ struct deck_recipe{
     uint8_t amount;
 };
 
-auto dracotail = std::to_array<deck_recipe>({
+constexpr auto dracotail = std::to_array<deck_recipe>({
     {"Droll & Lock Bird", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Droll.png", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Droll klein.png", 2},
     {R"(Maxx "C")", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Maxx C.png", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Maxx C klein.png", 1},
     {"Dracotail Phryxul", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Phryxul.png", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/Phryxul klein.png", 1},
