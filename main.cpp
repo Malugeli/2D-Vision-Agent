@@ -2,6 +2,8 @@
 TODO: 
 - Amount hinkriegen // obsolet da wir immer mit neuem Deck arbeiten. Unrealistisch das der Bot ein vorhandenes Deck bearbeiten würde und sehr ineffizient.
 - Fragen welches Deck er haben will
+
+Wir haben den Faktor bereits drinnen. Schreib einfach nur King Maher und speichere das ab
 */
 
 #include <iostream>
@@ -9,7 +11,6 @@ TODO:
 #include <chrono>
 #define NOMINMAX
 #include <Windows.h>
-#include "C:\Users\aluge\Desktop\Computer Science\Projekte\YgoBotMaher\unique_hotkey.h"
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <wil/com.h>
@@ -491,7 +492,11 @@ int main()
     visualSide visual(ygo);
     ygo_bot ygobot(bot, visual, ygo);
 
-    ygobot.deck_load(); 
+    ygobot.deck_load();
+
+    bot.click(ygo.get_UI_coordinates(UiTarget::deckname));
+    bot.type_string_return("Maher ist King!");
+    bot.click(ygo.get_UI_coordinates(UiTarget::savedeck));
 }
 
 
