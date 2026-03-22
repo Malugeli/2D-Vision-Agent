@@ -19,6 +19,8 @@ enum class UiTarget{
     deck_End,
     editor_Begin,
     editor_End,
+    deckname,
+    savedeck,
 
     COUNT // Sagt die Menge der Elemente an
     };
@@ -33,6 +35,9 @@ constexpr std::array<Faktorisierung, std::to_underlying(UiTarget::COUNT)> UI{{
     {0.67, 0.94},                       // DeckEnd
     {0.68, 0.28},                       // EditorBegin
     {0.97, 0.94},                       // EditorEnd
+    {0.4, 0.12},                       // Deckname
+    {0.88, 0.03}                        // Savedeck
+
     
 }};
 

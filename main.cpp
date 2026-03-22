@@ -23,6 +23,7 @@ Wir haben den Faktor bereits drinnen. Schreib einfach nur King Maher und speiche
 #include "faktor.h"
 #include "deck.h"
 
+double editfactor = 1.6463900862068966;
 
 struct card{
     cv::Mat deck;
@@ -194,7 +195,7 @@ struct visualSide{
         cv::Point p;
         cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
         
-        if (maxVal > 0.7) {
+        if (maxVal > 0.9) {
             POINT pp;
             pp.x = gameRect.x + (p.x + (card.cols / 2)); // Greift die Karte direkt in der Mitte. Sehr sus für Anti-Cheat
             pp.y = gameRect.y + (p.y + (card.rows / 2));
