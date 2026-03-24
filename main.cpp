@@ -486,45 +486,43 @@ int ask_question();
 
 int main(int argc, char* argv[])
 {
-    // Ich will was testen: 
-    // Wenn ich mehrere Decks habe die geladen werden können, möchte ich das wir per UI fragen können UND
-    // einmal eine Version wo wir das Args benutzen. Das Projekt ist niemals fertig!! 😈
-    // Per UI ist fertig, jetzt args
-    // Argv und argc waren einfacher als gedacht. wir haben beides sogar verbunden per If abfrage xD
-
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    SetConsoleOutputCP(CP_UTF8); 
+    SetConsoleCP(CP_UTF8);
     HWND game = FindWindow(NULL, "masterduel");
     ClientSide ygo(game);
     automate bot(ygo);
     visualSide visual(ygo);
     ygo_bot ygobot(bot, visual, ygo);
     std::span<char*> argument(argv, argc);
-
+    int deck_wish{};
+    try{
     if(argument.size() > 2){
         std::println("Usage: ./main.exe 1 oder 2");
         return 0;
     }
 
     if(argument.size() > 1){
-        int deck_wish = std::stoul(argv[1]);
+        deck_wish = std::stoul(argument[1]);
         if(deck_wish != 1 && deck_wish != 2){
             std::println("Nur eine Zahl zwischen 1 und 2 angeben!");
             return 0;
         }
-        ygobot.deck_load(deck_wish);
-        bot.click(ygo.get_UI_coordinates(UiTarget::deckname));
-        bot.type_string_return("Maher ist King!");
-        bot.click(ygo.get_UI_coordinates(UiTarget::savedeck));
     }
     else
     {
-    ygobot.deck_load(ask_question());
+    deck_wish = ask_question();
+    }
+}
+    catch(std::invalid_argument){
+        std::println("Keine gültige Zahl!");
+        return 0;
+    }
 
+    ygobot.deck_load(deck_wish);
     bot.click(ygo.get_UI_coordinates(UiTarget::deckname));
     bot.type_string_return("Maher ist King!");
     bot.click(ygo.get_UI_coordinates(UiTarget::savedeck));
-}
-   
 }
 
 int ask_question(){
