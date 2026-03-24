@@ -23,11 +23,8 @@ Wir haben den Faktor bereits drinnen. Schreib einfach nur King Maher und speiche
 #include "faktor.h"
 #include "deck.h"
 
-double editfactor = 1.6463900862068966;
-
 struct card{
-    cv::Mat deck;
-    cv::Mat editor;
+    cv::Mat picture;
     std::string_view name;
     uint8_t amount;
 };
@@ -176,6 +173,9 @@ struct visualSide{
     std::optional<POINT> findCard(cv::Mat card, ROI roi = ROI::all){
         updateFrame();
 
+
+        //nutze ich letztendlich nicht da die gegebenen Koordinaten nicht mehr absolut zum ClientRect sind sondern zum ROI.
+
         switch(roi){
             case ROI::all:
             cv::matchTemplate(currentFrame(gameRect), card, result, cv::TM_CCOEFF_NORMED);
@@ -195,7 +195,7 @@ struct visualSide{
         cv::Point p;
         cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
         
-        if (maxVal > 0.9) {
+        if (maxVal > 0.7) {
             POINT pp;
             pp.x = gameRect.x + (p.x + (card.cols / 2)); // Greift die Karte direkt in der Mitte. Sehr sus für Anti-Cheat
             pp.y = gameRect.y + (p.y + (card.rows / 2));
@@ -408,15 +408,19 @@ struct ygo_bot{
 
 
     void card_in(card karte){
-        if(auto card = visual.findCard(karte.editor))
+        double editfactor = 1.22; // das ist der Faktor um die Karte im Editor zu sehen!
+        cv::Mat editor;
+
+        cv::resize(karte.picture, editor, cv::Size(), editfactor, editfactor, cv::INTER_CUBIC); // CUBIC um zu vergrößern AREA zu verkleinern
+        if(auto card = visual.findCard(editor))
         {
             bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
         }
         else
-    {        bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
+    {       bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
             bot.type_string_return(karte.name);
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            if(auto card = visual.findCard(karte.editor)){
+            if(auto card = visual.findCard(editor)){
                 bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
             }
             else{
@@ -434,7 +438,7 @@ struct ygo_bot{
                         break;
                     }
                     
-                    if(auto card = visual.findCard(karte.editor)){
+                    if(auto card = visual.findCard(editor)){
                         bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
                         break;
                     }
@@ -449,28 +453,33 @@ struct ygo_bot{
 
 
 
-    bool deck_load(){
+    bool deck_load(int x = 1){
             double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
             card carde;
+            std::span<const deck_recipe> selected_deck;
 
-            for(int i = 0; i < dracotail.size(); ++i){
-                cv::Mat deck = cv::imread(static_cast<std::string>(dracotail[i].deck_path));
+            switch(x){
+                case 1:
+                selected_deck = dracotail;
+                break;
+
+                case 2:
+                selected_deck = vanquish;
+                break;
+            }
+
+            for(int i = 0; i < selected_deck.size(); ++i){
+                cv::Mat deck = cv::imread(static_cast<std::string>(selected_deck[i].deck_path));
                 if (deck.empty()) {
                     std::cout << "Karte nicht gefunden! ";
-                    return false;
-                }
-                cv::Mat editor = cv::imread(static_cast<std::string>(dracotail[i].editor_path));
-                    if (editor.empty()) {
-                    std::cout << "Editorkarte nicht gefunden! ";
                     return false;
                 }
                 double scale = ygo.ClientRect.bottom / Reference_Height; // Scalen per Height weil Widescreenmonitore existieren
                 if(std::abs(scale - 1.0) > 0.01){ // bei double niemals != 1.0 machen da Epsilontoleranz
                     cv::resize(deck, deck, cv::Size(), scale, scale, cv::INTER_AREA);
-                    cv::resize(editor, editor, cv::Size(), scale, scale, cv::INTER_AREA);
                 }
-                carde = {.deck = deck, .editor = editor, .name = dracotail[i].name};
-                for(int j = 0; j < dracotail[i].amount; ++j)
+                carde = {.picture = deck, .name = selected_deck[i].name};
+                for(int j = 0; j < selected_deck[i].amount; ++j)
                 {
                     card_in(carde);
                     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -480,11 +489,15 @@ struct ygo_bot{
         }
 };
 
+
+int ask_question();
+
 int main()
 {
     // Ich will was testen: 
     // Wenn ich mehrere Decks habe die geladen werden können, möchte ich das wir per UI fragen können UND
     // einmal eine Version wo wir das Args benutzen. Das Projekt ist niemals fertig!! 😈
+    // Per UI ist fertig, jetzt args
 
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     HWND game = FindWindow(NULL, "masterduel");
@@ -493,101 +506,23 @@ int main()
     visualSide visual(ygo);
     ygo_bot ygobot(bot, visual, ygo);
 
-    ygobot.deck_load();
+    ygobot.deck_load(ask_question());
 
     bot.click(ygo.get_UI_coordinates(UiTarget::deckname));
     bot.type_string_return("Maher ist King!");
     bot.click(ygo.get_UI_coordinates(UiTarget::savedeck));
+   
 }
 
+int ask_question(){
+    std::string answer;
+    int number{};
+    do{
+    std::println("Welches Deck willst du haben?\nDrücke 1 für Dracotail\nDrücke2 für K9 Vanquish Soul");
+    std::getline(std::cin, answer);
+    number = std::stoul(answer);
+    }
+    while(number != 1 && number != 2);
 
-/*
-TODO 
-Ich muss den ROI Region of interest verbessern für die Suche ob es im Deck oder Deck Editor ist.
-Ich muss einstellen dass die Karten öfters im Deck auftauchen können.
-Ich muss die card struct verändern das sie zwei cv::mats aufnimmt. Einmal die Deck und einmal die Editor Karte.
-Designated Initializer = .deck_karte = blabla, .editor_karte = dadada
-
-
-
-REGION OF INTEREST BERECHNUNG
-Deck ROI 502/216 - 1285/1006
-
-Editor ROI 1319/313 - 1858/1007
-
-ROI DECK X = 502/1923 - 1285/1923 ----- gamerect.right * 0.26 -  gamerect.right * 0.67
-ROI DECK Y = 216/1081 - 1006/1081 ----- gamerect.bottom * 0,19 - gamerect.bottom * 0,94
-
-
-Editor ROI x = 1319/1923 - 1858/1923 gamerect.right * 0.68 - gamrect.right * 0,97
-Editor ROI Y = 313/1081  - 1007/1081 gamerect.bottom * 0.28 - gamerect. bottom * * 0.94
-*/
-
-/*
-Ok die Funktion die wir schreiben literally macht alles weil das nicht viel ist. Die einzige Sache die ich sagen könnte wäre reade und resize aber das kann sogar in der loop passieren 
-dafür brauche ich keine neue Funktion.
-
-Sprich was passieren soll ist -> Output ist void oder bool wenn alles klappt und input ist ein std::array was das deck ist.
-
-Reference Height ist dann der erste variable und ansonsten brauchen wir nichts außer die sachen dir wir gerade soweiso mit albaz machen. ALLES was wir mit Albaz gerade machen, machen wir einfach in der Loop
-der Funktion.
-*/
-
-
-// struct deck_loader{ 
-//     ClientSide& client;
-//     visualSide& visual;
-//     ygo_bot& ygobot;
-//     double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
-//     card carde;
-    
-
-
-//     bool deck_load(){
-//     for(int i = 0; i < dracotail.size(); ++i){
-//         cv::Mat deck = cv::imread(static_cast<std::string>(dracotail[i].deck_path));
-//         if (deck.empty()) {
-//             std::cout << "Karte nicht gefunden! ";
-//             return false;
-//         }
-//         cv::Mat editor = cv::imread(static_cast<std::string>(dracotail[i].editor_path));
-//             if (editor.empty()) {
-//             std::cout << "Editorkarte nicht gefunden! ";
-//             return false;
-//         }
-
-
-//         double scale = client.ClientRect.bottom / Reference_Height; // Scalen per Height weil Widescreenmonitore existieren
-//         if(std::abs(scale - 1.0) > 0.01){ // bei double niemals != 1.0 machen da Epsilontoleranz
-//             cv::resize(deck, deck, cv::Size(), scale, scale, cv::INTER_AREA);
-//         }
-
-//         carde = {.deck = deck, .editor = editor, .name = dracotail[i].name};
-
-
-
-//         while (true) {
-//                 if (auto card = visual.findCard(carde.deck)) {
-//                 ygobot.card_out(carde.deck, card.value());
-//             }
-//             else{
-//                 ygobot.card_in(carde);
-//             }
-//             std::this_thread::sleep_for(std::chrono::milliseconds(600));
-//         }
-//     }
-// };
-
-
-    /*
-    Ok das Deck ist erstellt. Die Idee ist das wir niemals mehr als ein cv::Mat eigentlich da haben, da wir eigentlich nur die Deckliste in einer Loop abarbeiten,
-    die wir in deck.h haben.
-    Sprich wenn das Programm aktuell läuft, führen wir eine forloop aus die x mal durchläuft wo x die Größe des Deckarrays ist.
-    Die Frage ist, werden wir..
-
-    Ich glaube ich brauche die Klasse hier nicht, ich brauche nur eine Funktion die ein std::array als Input nimmt und dann ist das nur eine loop.
-    Das alles was wir dann mit resize machen etc kann die Funktion machen. Das ist nur "optional"
-    */
-
-
-    // };
+    return number;
+}
