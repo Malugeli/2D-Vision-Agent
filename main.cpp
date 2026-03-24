@@ -514,7 +514,7 @@ int main(int argc, char* argv[])
     deck_wish = ask_question();
     }
 }
-    catch(std::invalid_argument){
+    catch(const std::exception& e){ // statt nur Invalid Argument um OoR abzufangen
         std::println("Keine gültige Zahl!");
         return 0;
     }
