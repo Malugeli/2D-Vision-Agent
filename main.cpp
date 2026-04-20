@@ -1,3 +1,23 @@
+/*
+TODO: 
+1. Game läuft nicht auf anderen Monitoren. Hat was mit der Normalize zu tun und wie wir SendInput-fähige Koordrinaten erstellen weil wir ihm absolute sagen statt virtual desk oder sowas.
+Lösung: Line 204 rufen wir mit GameRect auf was bei virutellem Desktop zu einem negativen bzw übertriebenen Wert führt.
+
+Wirkliche Lösung: wir Acquiren einen Frame vom Hauptmonitor. der geht von 0 - 2560. Wir müssen dynamisch einen Screenshot vom jeweiligen Monitor machen.
+
+Enumoutput in einer Loop ausführen bis Fail.
+Die Nummer der Iterationen bis Fail sind die Anzahl der Monitore.
+
+Eine Idee ist, weil VisualSide ClientSide als Reference hat, den Wert von MONITORINFO direkt zu übernehmen. Das würde dazu führen das wir zwar immer den richtigen Monitor haben, das verschieben aber 
+nicht funktioniert.
+Aber da wir es nur initialisieren, können wir bei einem updateframe nur checken ob sich der monitor geändert hat, dafür müssten wir aber bei jedem Frame aufruf die monitorfromwindow aufrufen.
+
+
+1. Alle Monitore per IDXGI Ouput bei Initialiserung registrieren per Loop bis Fail.
+2. Führe BEVOR wir AcquireNextFrame ausführen, machen MonitorFromWindow und vergleichen es mit einem unserer IDXGIOutputs da darin ein HMONITOR ist.
+
+*/
+
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -24,6 +44,8 @@ struct card{
 struct ClientSide{
     HWND game;
     RECT ClientRect;
+    HMONITOR monitor;
+    MONITORINFO info;
     
     ClientSide() = default;
     ClientSide(HWND input) : game(input != NULL ? input : nullptr){
@@ -31,8 +53,7 @@ struct ClientSide{
     }
     
     POINT normalize(POINT p){ // Konvertiert P zu SendInput fähigen Zahlen
-        HMONITOR monitor = MonitorFromWindow(game, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO info;
+        monitor = MonitorFromWindow(game, MONITOR_DEFAULTTONEAREST);
         info.cbSize = sizeof(MONITORINFO);
         GetMonitorInfo(monitor, &info);
         int width = info.rcMonitor.right - info.rcMonitor.left;
@@ -88,9 +109,6 @@ struct visualSide{
         all
     };
     
-
-
-
     visualSide(ClientSide& client) : visualClient(client){
         THROW_IF_FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device, &feature, &context));
         auto idxgi = device.query<IDXGIDevice>();
@@ -98,20 +116,50 @@ struct visualSide{
         THROW_IF_FAILED(adapter->EnumOutputs(0, &output));
         auto output1 = output.query<IDXGIOutput1>();
         THROW_IF_FAILED(output1->DuplicateOutput(device.get(), &dupli));
-
-        // erster Frame ist Fehlerhaft. Wir löschen ihn direkt wieder
-        THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
-        dupli->ReleaseFrame();
-
         
 
+        
+        for(int i = 0; i < 100; ++i)
+        {
+            auto result = dupli->AcquireNextFrame(100, &frameinfo, &frame);
+            if(result == S_OK)
+            {
+                break;
+            }
+            if(result == DXGI_ERROR_WAIT_TIMEOUT)
+            {
+                continue;
+            }
+            else
+            {
+                THROW_HR(result);
+            }
+        }
+
+        if(!(frame))
+        {
+            // wenn nach 100x weiterhin Timeout, dann stimmt etwas nicht und brich ab
+            THROW_HR_MSG(DXGI_ERROR_WAIT_TIMEOUT, "Keine neuen Frame erhalten. Programm schließt sich!");
+        }
+        dupli->ReleaseFrame();
     }
     
     void updateFrame(){
-        THROW_IF_FAILED(dupli->AcquireNextFrame(100, &frameinfo, &frame));
+        //Wenn kein neuer Frame da, nutz den alten
+        auto result = dupli->AcquireNextFrame(100, &frameinfo, &frame);
+        if(result == DXGI_ERROR_WAIT_TIMEOUT){
+            return;
+        }
+        if(FAILED(result)){
+            THROW_HR(result);
+        }
         
+        //Scope sind cool! Keyword this da &dupli nicht funktioniert. dupli ist eine Membervariable!
+        auto releaseFrame = wil::scope_exit([this](){dupli->ReleaseFrame();}); 
+
+
         auto realframe = frame.query<ID3D11Texture2D>();
-        
+
         if(!cpuframe)
         {
             realframe->GetDesc(&desc);
@@ -126,15 +174,21 @@ struct visualSide{
         
         D3D11_MAPPED_SUBRESOURCE mapped;
         context->Map(cpuframe.get(), 0, D3D11_MAP_READ, 0, &mapped);
-        
+        auto unmap = wil::scope_exit([this](){context->Unmap(cpuframe.get(), 0);});
 
 
         //Wir machen das hier damit der User das Fenster bewegen kann und wir immer die richtigen Stellen abschneiden.
-    
         //Game Rect
         POINT window_start{0, 0};
+        POINT game_start;
+        game_start.x = visualClient.info.rcMonitor.right - (visualClient.ClientRect.right);
+        game_start.y = visualClient.info.rcMonitor.bottom - (visualClient.ClientRect.bottom);
         ClientToScreen(visualClient.game, &window_start);
-        gameRect = cv::Rect(window_start.x, window_start.y, visualClient.ClientRect.right, visualClient.ClientRect.bottom);
+        gameRect = cv::Rect(window_start.x, window_start.y, game_start.x, game_start.y);
+        std::println("Monitor Right: {}", visualClient.info.rcMonitor.right);
+        std::println("Client Right: {}", visualClient.ClientRect.right);
+        std::println("Gamestart: {}", game_start.x);
+        std::println("Gamerect.x: {}", gameRect.x);
         
 
         //Deck Rect
@@ -153,21 +207,16 @@ struct visualSide{
         
         editorRect = cv::Rect(editor_start.x, editor_start.y, editor_width, editor_height);
 
-        // Konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zur PNG passt und 
+        // Erstelle cv::Mat vom Frame und konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zur PNG passt und 
         cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
         cv::cvtColor(screenshotBGRA, currentFrame, cv::COLOR_BGRA2BGR);
 
         // Frame wurde bereits mit "currentFrame" in Memory geladen und wir können diesen nun sicher releasen
-        dupli->ReleaseFrame();
-        context->Unmap(cpuframe.get(), 0);
     }
 
     std::optional<POINT> findCard(cv::Mat card, ROI roi = ROI::all){
         updateFrame();
-
-
         //nutze ich letztendlich nicht da die gegebenen Koordinaten nicht mehr absolut zum ClientRect sind sondern zum ROI.
-
         switch(roi){
             case ROI::all:
             cv::matchTemplate(currentFrame(gameRect), card, result, cv::TM_CCOEFF_NORMED);
@@ -187,7 +236,8 @@ struct visualSide{
         cv::Point p;
         cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
         
-        if (maxVal > 0.7) {
+        if (maxVal > 0.7) 
+        {
             POINT pp;
             pp.x = gameRect.x + (p.x + (card.cols / 2)); // Greift die Karte direkt in der Mitte. Sehr sus für Anti-Cheat
             pp.y = gameRect.y + (p.y + (card.rows / 2));
@@ -200,14 +250,18 @@ struct visualSide{
 };
 
 struct automate{
-    INPUT inputM;
-    INPUT inputK;
+    INPUT inputM{};
+    INPUT inputK{};
     ClientSide& client;
     std::random_device rd;
     std::mt19937 gen;
     std::normal_distribution<double> pause;
 
-    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(90, 10) {}; // so führen wir Funktionen aus die wir beim erstellen der Objekte machen wollten..
+    automate(ClientSide& otherclient) : client(otherclient), gen(rd()), pause(70, 5) {
+        inputM.type = INPUT_MOUSE;
+        inputK.type = INPUT_KEYBOARD;
+        // Type dürfen nicht 0 sein, werden in der Konstruktorfunktion hier gesetzt. Die Flags in den jeweiligen Funktionen!
+    };
     
     void mouse_move(POINT goal){
         POINT start;
@@ -228,7 +282,6 @@ struct automate{
         
         p2.x = start.x + ((goal.x - start.x) * 0.7) + magnet(gen);
         p2.y = start.y + ((goal.y - start.y) * 0.7) + magnet(gen);
-        inputM.type = INPUT_MOUSE;
         inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
     
         for(double t = 0.0; t <= 1.0; t = t + steps){
@@ -269,121 +322,133 @@ struct automate{
     }
 
     void drag(POINT startcord, POINT targetcord){
-    mouse_move(startcord);
+        mouse_move(startcord);
 
-    inputM.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-    SendInput(1, &inputM, sizeof(inputM));
-    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+        inputM.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        SendInput(1, &inputM, sizeof(inputM));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
 
-    mouse_move(targetcord);
+        mouse_move(targetcord);
 
-    inputM.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-    SendInput(1, &inputM, sizeof(inputM));
-    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+        inputM.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        SendInput(1, &inputM, sizeof(inputM));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
 }
 
+    void type_key(BYTE s){
+        //Key Down
+        inputK.ki.wScan = MapVirtualKey(s, MAPVK_VK_TO_VSC);
+        inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
+        SendInput(1, &inputK, sizeof(inputK));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+
+        //Key Up
+        inputK.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
+        SendInput(1, &inputK, sizeof(inputK));   
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
+    }
+    
+    
+    void type_key_shift(BYTE s){
+        //Shift Down
+        inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
+        inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
+        SendInput(1, &inputK, sizeof(inputK));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+
+        //Key Down
+        inputK.ki.wScan = MapVirtualKey(s, MAPVK_VK_TO_VSC);
+        inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
+        SendInput(1, &inputK, sizeof(inputK));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+    
+        //Key Up
+        inputK.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
+        SendInput(1, &inputK, sizeof(inputK));   
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
+
+        // Shift Up
+        inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
+        SendInput(1, &inputK, sizeof(inputK));
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+    }
 
 
     //Tastatur
-    void type_string(std::string_view s){
-        inputK.type = INPUT_KEYBOARD;
+    void type_string(std::string_view s, bool type_return = true){
             for(char c : s){
                 SHORT checkKey = VkKeyScan(c);
                 if((checkKey >> 8) & 1){
                     // Erstmal Shift drücken
                     inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
                     inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
-                    SendInput(1, &inputK, sizeof(INPUT));
+                    SendInput(1, &inputK, sizeof(inputK));
                     std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
 
                     // Jetzt Buchstabe
-                    BYTE virtualKey = VkKeyScan(c); // statt nochmal Funktionsaufruf kann ich Bitshiften und nur die untersten 8 Bits hier laden.
+                    BYTE virtualKey = LOBYTE(checkKey); // statt nochmal Funktionsaufruf kann ich Bitshiften und nur die untersten 8 Bits hier laden.
                     inputK.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
                     inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
-                    SendInput(1, &inputK, sizeof(INPUT));
+                    SendInput(1, &inputK, sizeof(inputK));
                     std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
 
                     // Buchstabe Loslassen
                     inputK.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
-                    SendInput(1, &inputK, sizeof(INPUT));   
+                    SendInput(1, &inputK, sizeof(inputK));   
                     std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
 
                     // dann Shift loslassen
                     inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
-                    SendInput(1, &inputK, sizeof(INPUT));   
+                    SendInput(1, &inputK, sizeof(inputK));   
                     std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
                 }
                 else
                 {               
-                    BYTE virtualKey = VkKeyScan(c);
+                    BYTE virtualKey = LOBYTE(checkKey);
                     inputK.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
                     
                     inputK.ki.dwFlags = KEYEVENTF_SCANCODE; // Drücken (Key Down)
 
                     // --- KEY DOWN ---
-                    SendInput(1, &inputK, sizeof(INPUT));
+                    SendInput(1, &inputK, sizeof(inputK));
                     std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
 
                     // --- KEY UP ---
                     inputK.ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
                         // Loslassen
-                    SendInput(1, &inputK, sizeof(INPUT));
+                    SendInput(1, &inputK, sizeof(inputK));
                 }
-   }
+            }
+            if(type_return){
+                    inputK.ki.wScan = MapVirtualKey(VK_RETURN, MAPVK_VK_TO_VSC);
+                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
+                    SendInput(1, &inputK, sizeof(inputK));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
+                    SendInput(1, &inputK, sizeof(inputK));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
+            }
     }
 
-    void type_string_return(std::string_view s){ //selbe Funktion wie oben nur am Ende noch Enter. Erinnert mich an std::print() und std::println(). Nicht sicher ob das optimal ist..
-        inputK.type = INPUT_KEYBOARD;
-            for(char c : s){
-                SHORT checkKey = VkKeyScan(c);
-                if((checkKey >> 8) & 1){
-                    // Erstmal Shift drücken
-                    inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
-                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
-                    SendInput(1, &inputK, sizeof(INPUT));
-                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
 
-                    // Jetzt Buchstabe
-                    BYTE virtualKey = VkKeyScan(c); // statt nochmal Funktionsaufruf kann ich Bitshiften und nur die untersten 8 Bits hier laden.
-                    inputK.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
-                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
-                    SendInput(1, &inputK, sizeof(INPUT));
-                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
+    // eine Alternative, weniger DRY und Wartbarer mit den Helferfunktionen
+    void type_string_alternative(std::string_view s, bool type_return = true){
+        for(char c : s){
+            SHORT checkKey = VkKeyScan(c);
+            if((checkKey >> 8) & 1){
+                type_key_shift(LOBYTE(checkKey));
+            }
+            else{
+                type_key(LOBYTE(checkKey));
+            }
+        }
+        if(type_return){
+            inputK.ki.wScan = MapVirtualKey(VK_RETURN, MAPVK_VK_TO_VSC);
+            inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
+            SendInput(1, &inputK, sizeof(inputK));
+            std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
+        }
 
-                    // Buchstabe Loslassen
-                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
-                    SendInput(1, &inputK, sizeof(INPUT));   
-                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
-
-                    // dann Shift loslassen
-                    inputK.ki.wScan = MapVirtualKey(VK_SHIFT, MAPVK_VK_TO_VSC);
-                    SendInput(1, &inputK, sizeof(INPUT));   
-                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
-                }
-                else
-                {               
-                    BYTE virtualKey = VkKeyScan(c);
-                    inputK.ki.wScan = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
-                    
-                    inputK.ki.dwFlags = KEYEVENTF_SCANCODE; // Drücken (Key Down)
-
-                    // --- KEY DOWN ---
-                    SendInput(1, &inputK, sizeof(INPUT));
-                    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
-
-                    // --- KEY UP ---
-                    inputK.ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
-                        // Loslassen
-                    SendInput(1, &inputK, sizeof(INPUT));
-                }
-   }
-    inputK.ki.wScan = MapVirtualKey(VK_RETURN, MAPVK_VK_TO_VSC);
-    inputK.ki.dwFlags = KEYEVENTF_SCANCODE;
-    SendInput(1, &inputK, sizeof(INPUT));
-    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen))));
-    inputK.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
-    SendInput(1, &inputK, sizeof(INPUT));
-    std::this_thread::sleep_for(std::chrono::milliseconds(std::lround(pause(gen)))); 
     }
 };
 
@@ -410,7 +475,7 @@ struct ygo_bot{
         }
         else
     {       bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
-            bot.type_string_return(karte.name);
+            bot.type_string(karte.name);
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             if(auto card = visual.findCard(editor)){
                 bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
@@ -436,7 +501,7 @@ struct ygo_bot{
                     }
                     else{
                         POINT pp = p;
-                        p.y = p.y * 1.1;
+                        p.y = p.y + 150;
                         p.x = searchx;
                         bot.drag(pp, p);
                     }
@@ -482,7 +547,7 @@ struct ygo_bot{
 };
 
 
-int ask_question();
+std::optional<int> ask_question(char* argv[], int argc);
 
 int main(int argc, char* argv[])
 {
@@ -490,50 +555,58 @@ int main(int argc, char* argv[])
     SetConsoleOutputCP(CP_UTF8); 
     SetConsoleCP(CP_UTF8);
     HWND game = FindWindow(NULL, "masterduel");
+    if(game == NULL){
+        std::println("Game not found!");
+        return 1;
+    }
+
     ClientSide ygo(game);
     automate bot(ygo);
     visualSide visual(ygo);
     ygo_bot ygobot(bot, visual, ygo);
+
+    auto deck_wish = ask_question(argv, argc);
+    if(!(deck_wish)){
+        return 1;
+    }
+    ygobot.deck_load(deck_wish.value());
+    bot.click(ygo.get_UI_coordinates(UiTarget::deckname));
+    bot.type_string_alternative("Maher ist King!");
+    bot.click(ygo.get_UI_coordinates(UiTarget::savedeck));
+}
+
+
+std::optional<int> ask_question(char* argv[], int argc){
     std::span<char*> argument(argv, argc);
     int deck_wish{};
     try{
     if(argument.size() > 2){
         std::println("Usage: ./main.exe 1 oder 2");
-        return 0;
+        return std::nullopt;
     }
 
     if(argument.size() > 1){
         deck_wish = std::stoul(argument[1]);
         if(deck_wish != 1 && deck_wish != 2){
             std::println("Nur eine Zahl zwischen 1 und 2 angeben!");
-            return 0;
+            return std::nullopt;
         }
     }
     else
     {
-    deck_wish = ask_question();
+        std::string answer;
+        do{
+        std::println("Welches Deck willst du haben?\nDrücke 1 für Dracotail\nDrücke 2 für K9 Vanquish Soul");
+        std::getline(std::cin, answer);
+        deck_wish = std::stoul(answer);
+        }
+        while(deck_wish != 1 && deck_wish != 2);
     }
 }
     catch(const std::exception& e){ // statt nur Invalid Argument um OoR abzufangen
         std::println("Keine gültige Zahl!");
-        return 0;
+        return std::nullopt;
     }
 
-    ygobot.deck_load(deck_wish);
-    bot.click(ygo.get_UI_coordinates(UiTarget::deckname));
-    bot.type_string_return("Maher ist King!");
-    bot.click(ygo.get_UI_coordinates(UiTarget::savedeck));
-}
-
-int ask_question(){
-    std::string answer;
-    int number{};
-    do{
-    std::println("Welches Deck willst du haben?\nDrücke 1 für Dracotail\nDrücke2 für K9 Vanquish Soul");
-    std::getline(std::cin, answer);
-    number = std::stoul(answer);
-    }
-    while(number != 1 && number != 2);
-
-    return number;
+    return deck_wish;
 }
