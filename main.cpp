@@ -1,20 +1,9 @@
 /*
-TODO: 
-1. Game läuft nicht auf anderen Monitoren. Hat was mit der Normalize zu tun und wie wir SendInput-fähige Koordrinaten erstellen weil wir ihm absolute sagen statt virtual desk oder sowas.
-Lösung: Line 204 rufen wir mit GameRect auf was bei virutellem Desktop zu einem negativen bzw übertriebenen Wert führt.
+TODO:
 
-Wirkliche Lösung: wir Acquiren einen Frame vom Hauptmonitor. der geht von 0 - 2560. Wir müssen dynamisch einen Screenshot vom jeweiligen Monitor machen.
-
-Enumoutput in einer Loop ausführen bis Fail.
-Die Nummer der Iterationen bis Fail sind die Anzahl der Monitore.
-
-Eine Idee ist, weil VisualSide ClientSide als Reference hat, den Wert von MONITORINFO direkt zu übernehmen. Das würde dazu führen das wir zwar immer den richtigen Monitor haben, das verschieben aber 
-nicht funktioniert.
-Aber da wir es nur initialisieren, können wir bei einem updateframe nur checken ob sich der monitor geändert hat, dafür müssten wir aber bei jedem Frame aufruf die monitorfromwindow aufrufen.
-
-
-1. Alle Monitore per IDXGI Ouput bei Initialiserung registrieren per Loop bis Fail.
-2. Führe BEVOR wir AcquireNextFrame ausführen, machen MonitorFromWindow und vergleichen es mit einem unserer IDXGIOutputs da darin ein HMONITOR ist.
+1. Die UI Bewegung funktioniert wieder. Er findet die Karte, greift aber falsch. Die Koordinaten die OpenCV uns übergibt sind nicht richtig.. sie sind nicht auf dem VirtualScreen Format. 
+2. Die Unique_Hotkey geht nicht während einer Aufgabe. Er ignoriert es bis die Aufgabe erledigt ist. Ich muss etwas machen damit er während ich arbeite PostQuitMessage macht.
+3. Die Daten sind kinda fucked up. Er findet die Karte wieder aber er trifft sie nicht und tut sie dadurch auch nicht ins Deck. Wir arbeiten mit veralteten Daten sicherlich.
 
 */
 
@@ -34,6 +23,9 @@ Aber da wir es nur initialisieren, können wir bei einem updateframe nur checken
 #include <span>
 #include "faktor.h"
 #include "deck.h"
+#include "unique_hotkey.h"
+#include <atomic>
+#include <thread>
 
 struct card{
     cv::Mat picture;
@@ -41,26 +33,30 @@ struct card{
     uint8_t amount;
 };
 
+struct MonitorDuplicator{
+    HMONITOR hmonitor;
+    wil::com_ptr<IDXGIOutputDuplication> duplication;
+};
+
 struct ClientSide{
     HWND game;
     RECT ClientRect;
-    HMONITOR monitor;
-    MONITORINFO info;
+    POINT virtual_start;
+    POINT virtual_size;
     
     ClientSide() = default;
     ClientSide(HWND input) : game(input != NULL ? input : nullptr){
         GetClientRect(game, &ClientRect);
+        virtual_start.x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        virtual_start.y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+
+        virtual_size.x = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        virtual_size.y = GetSystemMetrics(SM_CYVIRTUALSCREEN);
     }
     
     POINT normalize(POINT p){ // Konvertiert P zu SendInput fähigen Zahlen
-        monitor = MonitorFromWindow(game, MONITOR_DEFAULTTONEAREST);
-        info.cbSize = sizeof(MONITORINFO);
-        GetMonitorInfo(monitor, &info);
-        int width = info.rcMonitor.right - info.rcMonitor.left;
-        int height = info.rcMonitor.bottom - info.rcMonitor.top;
-        
-        p.x = std::lround((p.x * 65535.0) / width);
-        p.y = std::lround((p.y * 65535.0) / height);
+        p.x = std::lround(((p.x - virtual_start.x) * 65535.0) / virtual_size.x);
+        p.y = std::lround(((p.y - virtual_start.y) * 65535.0) / virtual_size.y);
         return p;
     }
 
@@ -87,10 +83,12 @@ struct ClientSide{
 
 struct visualSide{
     ClientSide& visualClient;
+    std::atomic<bool>& keep_running;
     wil::com_ptr<ID3D11Device> device;
     wil::com_ptr<ID3D11DeviceContext> context;
     D3D_FEATURE_LEVEL feature;
     wil::com_ptr<IDXGIAdapter> adapter;
+    std::vector<MonitorDuplicator> monitors; // Vektor für mehrere Monitore
     wil::com_ptr<IDXGIOutput> output;
     wil::com_ptr<IDXGIOutputDuplication> dupli;
     wil::com_ptr<ID3D11Texture2D> cpuframe;
@@ -109,115 +107,157 @@ struct visualSide{
         all
     };
     
-    visualSide(ClientSide& client) : visualClient(client){
+    visualSide(ClientSide& client, std::atomic<bool>& running) : visualClient(client), keep_running(running){
         THROW_IF_FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device, &feature, &context));
         auto idxgi = device.query<IDXGIDevice>();
         THROW_IF_FAILED(idxgi->GetAdapter(&adapter));
-        THROW_IF_FAILED(adapter->EnumOutputs(0, &output));
-        auto output1 = output.query<IDXGIOutput1>();
-        THROW_IF_FAILED(output1->DuplicateOutput(device.get(), &dupli));
-        
 
-        
-        for(int i = 0; i < 100; ++i)
-        {
-            auto result = dupli->AcquireNextFrame(100, &frameinfo, &frame);
-            if(result == S_OK)
+        int x = 0; 
+        while(adapter->EnumOutputs(x, &output) == S_OK){
+            //Hole dir den HMONITOR zum vergleichen später
+            MonitorDuplicator monitor{};
+            DXGI_OUTPUT_DESC description;
+            THROW_IF_FAILED(output->GetDesc(&description));
+            monitor.hmonitor = description.Monitor;
+
+            //Duplication hier für den Frame
+            auto output1 = output.query<IDXGIOutput1>();
+            THROW_IF_FAILED(output1->DuplicateOutput(device.get(), &dupli));
+            monitor.duplication = dupli;
+            monitors.push_back(monitor);
+
+
+            //ersten Frame des Monitors verwerfen
+            for(int i = 0; i < 100; ++i)
             {
-                break;
+                auto result = dupli->AcquireNextFrame(100, &frameinfo, &frame);
+                if(result == S_OK)
+                {
+                    break;
+                }
+                if(result == DXGI_ERROR_WAIT_TIMEOUT)
+                {
+                    continue;
+                }
+                else
+                {
+                    THROW_HR(result);
+                }
             }
-            if(result == DXGI_ERROR_WAIT_TIMEOUT)
+    
+            if(!(frame))
             {
-                continue;
+                // wenn nach 100x weiterhin Timeout, dann stimmt etwas nicht und brich ab
+                THROW_HR_MSG(DXGI_ERROR_WAIT_TIMEOUT, "Keine neuen Frame erhalten. Programm schließt sich!");
             }
-            else
-            {
-                THROW_HR(result);
-            }
+            dupli->ReleaseFrame();
+
+            ++x;
         }
 
-        if(!(frame))
-        {
-            // wenn nach 100x weiterhin Timeout, dann stimmt etwas nicht und brich ab
-            THROW_HR_MSG(DXGI_ERROR_WAIT_TIMEOUT, "Keine neuen Frame erhalten. Programm schließt sich!");
-        }
-        dupli->ReleaseFrame();
     }
     
-    void updateFrame(){
-        //Wenn kein neuer Frame da, nutz den alten
-        auto result = dupli->AcquireNextFrame(100, &frameinfo, &frame);
-        if(result == DXGI_ERROR_WAIT_TIMEOUT){
-            return;
+    bool updateFrame(){
+        //Wir checken pro Frame ob der User den Button gedrückt hat.
+        if(!keep_running){
+            return false;
         }
-        if(FAILED(result)){
-            THROW_HR(result);
+
+        HMONITOR game = MonitorFromWindow(visualClient.game, MONITOR_DEFAULTTONEAREST);
+        for(int i = 0; i < monitors.size(); ++i){
+            if(game == monitors[i].hmonitor){
+                auto dupli = monitors[i].duplication;
+                auto result = dupli->AcquireNextFrame(100, &frameinfo, &frame);
+                
+                //Wenn kein neuer Frame da, nutz den alten
+                if(result == DXGI_ERROR_WAIT_TIMEOUT){
+                    return true; //weiß nicht ob true ok hier ist oder lieber break
+                }
+                
+                if(FAILED(result)){
+                    THROW_HR(result);
+                }
+                
+                MONITORINFO info;
+                info.cbSize = sizeof(MONITORINFO);
+                GetMonitorInfo(monitors[i].hmonitor, &info);
+
+                //Scope sind cool! Keyword this da &dupli nicht funktioniert. dupli ist eine Membervariable!
+                auto releaseFrame = wil::scope_exit([this, dupli](){dupli->ReleaseFrame();}); 
+                
+    
+                auto realframe = frame.query<ID3D11Texture2D>();
+        
+                if(!cpuframe)
+                {
+                    realframe->GetDesc(&desc);
+                    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                    desc.Usage = D3D11_USAGE_STAGING;
+                    desc.BindFlags = 0;
+                    desc.MiscFlags = 0;
+                    THROW_IF_FAILED(device->CreateTexture2D(&desc, nullptr, &cpuframe));
+                }
+                
+                context->CopyResource(cpuframe.get(), realframe.get());
+                
+                D3D11_MAPPED_SUBRESOURCE mapped;
+                context->Map(cpuframe.get(), 0, D3D11_MAP_READ, 0, &mapped);
+                auto unmap = wil::scope_exit([this](){context->Unmap(cpuframe.get(), 0);});
+        
+        
+                //Wir machen das hier damit der User das Fenster bewegen kann und wir immer die richtigen Stellen abschneiden.
+                //Game Rect
+                POINT window_start{0, 0};
+                int width = visualClient.ClientRect.right;
+                int height = visualClient.ClientRect.bottom;
+
+                ClientToScreen(visualClient.game, &window_start);
+                window_start.x = window_start.x - info.rcMonitor.left;
+                gameRect = cv::Rect(window_start.x, window_start.y, width, height);
+
+                std::println("Width: {}, Height {}", width, height);
+                std::println("Gamerect.x: {}", gameRect.x);
+                std::println("Gamerect.y: {}", gameRect.y);
+                std::println("Gamerect.width: {}", gameRect.width);
+                std::println("Gamerect.height: {}", gameRect.height);
+                
+        
+                //Deck Rect
+                POINT deck_start = visualClient.get_UI_coordinates(UiTarget::deck_Begin);
+                POINT deck_end = visualClient.get_UI_coordinates(UiTarget::deck_End);
+                int deck_width = deck_end.x - deck_start.x;
+                int deck_height = deck_end.y - deck_start.y; 
+                
+                deckRect = cv::Rect(deck_start.x, deck_start.y, deck_width, deck_height);
+                
+                //Editor Rect
+                POINT editor_start = visualClient.get_UI_coordinates(UiTarget::editor_Begin);
+                POINT editor_end = visualClient.get_UI_coordinates(UiTarget::editor_End);
+                int editor_width = editor_end.x - editor_start.x;
+                int editor_height = editor_end.y - editor_start.y; 
+                
+                editorRect = cv::Rect(editor_start.x, editor_start.y, editor_width, editor_height);
+        
+                // Erstelle cv::Mat vom Frame und konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zur PNG passt und 
+                cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
+                cv::cvtColor(screenshotBGRA, currentFrame, cv::COLOR_BGRA2BGR);
+        
+                // Frame wurde bereits mit "currentFrame" in Memory geladen und wir können diesen nun sicher releasen
+                break;
+            }
         }
-        
-        //Scope sind cool! Keyword this da &dupli nicht funktioniert. dupli ist eine Membervariable!
-        auto releaseFrame = wil::scope_exit([this](){dupli->ReleaseFrame();}); 
-
-
-        auto realframe = frame.query<ID3D11Texture2D>();
-
-        if(!cpuframe)
-        {
-            realframe->GetDesc(&desc);
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-            desc.Usage = D3D11_USAGE_STAGING;
-            desc.BindFlags = 0;
-            desc.MiscFlags = 0;
-            THROW_IF_FAILED(device->CreateTexture2D(&desc, nullptr, &cpuframe));
-        }
-        
-        context->CopyResource(cpuframe.get(), realframe.get());
-        
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        context->Map(cpuframe.get(), 0, D3D11_MAP_READ, 0, &mapped);
-        auto unmap = wil::scope_exit([this](){context->Unmap(cpuframe.get(), 0);});
-
-
-        //Wir machen das hier damit der User das Fenster bewegen kann und wir immer die richtigen Stellen abschneiden.
-        //Game Rect
-        POINT window_start{0, 0};
-        POINT game_start;
-        game_start.x = visualClient.info.rcMonitor.right - (visualClient.ClientRect.right);
-        game_start.y = visualClient.info.rcMonitor.bottom - (visualClient.ClientRect.bottom);
-        ClientToScreen(visualClient.game, &window_start);
-        gameRect = cv::Rect(window_start.x, window_start.y, game_start.x, game_start.y);
-        std::println("Monitor Right: {}", visualClient.info.rcMonitor.right);
-        std::println("Client Right: {}", visualClient.ClientRect.right);
-        std::println("Gamestart: {}", game_start.x);
-        std::println("Gamerect.x: {}", gameRect.x);
-        
-
-        //Deck Rect
-        POINT deck_start = visualClient.get_UI_coordinates(UiTarget::deck_Begin);
-        POINT deck_end = visualClient.get_UI_coordinates(UiTarget::deck_End);
-        int deck_width = deck_end.x - deck_start.x;
-        int deck_height = deck_end.y - deck_start.y; 
-        
-        deckRect = cv::Rect(deck_start.x, deck_start.y, deck_width, deck_height);
-        
-        //Editor Rect
-        POINT editor_start = visualClient.get_UI_coordinates(UiTarget::editor_Begin);
-        POINT editor_end = visualClient.get_UI_coordinates(UiTarget::editor_End);
-        int editor_width = editor_end.x - editor_start.x;
-        int editor_height = editor_end.y - editor_start.y; 
-        
-        editorRect = cv::Rect(editor_start.x, editor_start.y, editor_width, editor_height);
-
-        // Erstelle cv::Mat vom Frame und konvertiere 4 Kanäle (BGRA) zu 3 Kanälen (BGR), damit es zur PNG passt und 
-        cv::Mat screenshotBGRA(desc.Height, desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
-        cv::cvtColor(screenshotBGRA, currentFrame, cv::COLOR_BGRA2BGR);
-
-        // Frame wurde bereits mit "currentFrame" in Memory geladen und wir können diesen nun sicher releasen
+        return true;
     }
 
     std::optional<POINT> findCard(cv::Mat card, ROI roi = ROI::all){
-        updateFrame();
+        
+        if(!updateFrame()){
+            return std::nullopt;
+        };
+
         //nutze ich letztendlich nicht da die gegebenen Koordinaten nicht mehr absolut zum ClientRect sind sondern zum ROI.
-        switch(roi){
+        switch(roi)
+        {
             case ROI::all:
             cv::matchTemplate(currentFrame(gameRect), card, result, cv::TM_CCOEFF_NORMED);
             break;
@@ -227,12 +267,12 @@ struct visualSide{
             break;
 
             case ROI::editor:
-            cv::matchTemplate(currentFrame(editorRect), card, result, cv::TM_CCOEFF_NORMED);
-            break;
+            cv::matchTemplate(currentFrame(editorRect), card, result, cv::TM_CCOEFF);
         }
 
         double minVal;
         double maxVal;
+        
         cv::Point p;
         cv::minMaxLoc(result, &minVal, &maxVal, NULL, &p);
         
@@ -241,9 +281,12 @@ struct visualSide{
             POINT pp;
             pp.x = gameRect.x + (p.x + (card.cols / 2)); // Greift die Karte direkt in der Mitte. Sehr sus für Anti-Cheat
             pp.y = gameRect.y + (p.y + (card.rows / 2));
+            std::println("Found at {}", pp.x);
             return pp;
         }
-        else{
+
+        else
+        {
             return std::nullopt;
         }
     }
@@ -282,7 +325,7 @@ struct automate{
         
         p2.x = start.x + ((goal.x - start.x) * 0.7) + magnet(gen);
         p2.y = start.y + ((goal.y - start.y) * 0.7) + magnet(gen);
-        inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+        inputM.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
     
         for(double t = 0.0; t <= 1.0; t = t + steps){
             // Die Variablen werden niemals im RAM landen, Compiler versteht das die nur temp sind und schreibt sie direkt ins Register.
@@ -456,61 +499,79 @@ struct ygo_bot{
     automate& bot;
     visualSide& visual;
     ClientSide& ygo;
+    std::atomic<bool>& keep_running;
 
-    ygo_bot(automate& a, visualSide& v, ClientSide& c) : bot(a), visual(v), ygo(c){};
+    ygo_bot(automate& a, visualSide& v, ClientSide& c, std::atomic<bool>& running) : bot(a), visual(v), ygo(c), keep_running(running){};
 
     void card_out(cv::Mat card, POINT p){
         bot.drag(p, ygo.get_UI_coordinates(UiTarget::out));
     }
 
 
-    void card_in(card karte){
+    std::optional<bool> card_in(card karte){
         double editfactor = 1.22; // das ist der Faktor um die Karte im Editor zu sehen!
         cv::Mat editor;
 
         cv::resize(karte.picture, editor, cv::Size(), editfactor, editfactor, cv::INTER_CUBIC); // CUBIC um zu vergrößern AREA zu verkleinern
-        if(auto card = visual.findCard(editor))
+        if(auto card = visual.findCard(editor); card && keep_running) // Interessant wie Compiler auto benutzt. Ohne initialisierung haut es uns um die Ohren
         {
             bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
+            return true;
         }
         else
-    {       bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
+    {       
+            if(!keep_running){
+                return std::nullopt;
+            }
+            bot.click(ygo.get_UI_coordinates(UiTarget::searchbar));
             bot.type_string(karte.name);
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            if(auto card = visual.findCard(editor)){
-                bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
+            if(auto card = visual.findCard(editor); card && keep_running){
+                bot.drag(*card, ygo.get_UI_coordinates(UiTarget::in)); //.value() führt Sicherheitscheck durch den wir bereits oben gemacht haben. Nutze *card um direkt auf Wert zuzugreifen
+                return true;
             }
             else{
+                if(!keep_running)
+                {
+                    return std::nullopt;
+                }
                 POINT p;
                 bot.mouse_move(ygo.get_UI_coordinates(UiTarget::scrollbar));
                 int searchx = ygo.get_UI_coordinates(UiTarget::scrollbar).x; // durch die Bezierkurve rutscht x manchmal aus der Searchbar 
-                POINT border;
-                border.x = ygo.ClientRect.right;
-                border.y = ygo.ClientRect.bottom; 
+                POINT border{ygo.ClientRect.right, ygo.ClientRect.bottom};
                 ClientToScreen(ygo.game, &border);
                 while(true){
+                    if(!keep_running)
+                    {
+                        return std::nullopt;
+                    }
+
                     GetCursorPos(&p);
                     if(p.y >= border.y){
                         std::println("Karte nicht gefunden!");
-                        break;
+                        return false;
                     }
-                    
-                    if(auto card = visual.findCard(editor)){
-                        bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
-                        break;
+
+                    if(auto card = visual.findCard(editor); card && keep_running){
+                        bot.drag(*card, ygo.get_UI_coordinates(UiTarget::in));
+                        return true;
                     }
                     else{
+                        if(!keep_running){
+                            return std::nullopt;
+                        }
                         POINT pp = p;
                         p.y = p.y + 150;
                         p.x = searchx;
                         bot.drag(pp, p);
                     }
                 }}
-            }}
+            }
+        }
 
 
 
-    bool deck_load(int x = 1){
+    bool deck_load(int x){
             double Reference_Height = 2160.0; //die Karten wurden in 4K Auflösung fotografiert und resizen sich mit der Auflösung des Users
             card carde;
             std::span<const deck_recipe> selected_deck;
@@ -538,7 +599,9 @@ struct ygo_bot{
                 carde = {.picture = deck, .name = selected_deck[i].name};
                 for(int j = 0; j < selected_deck[i].amount; ++j)
                 {
-                    card_in(carde);
+                    if(!card_in(carde).has_value()){
+                        return false;
+                    }
                     std::this_thread::sleep_for(std::chrono::milliseconds(300));
                 }
         }
@@ -560,19 +623,45 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    std::atomic<bool> keep_running = true; //liegt auf Stack vom Mainthread
+    std::thread second_thread{}; //Callen wir um Scopeprobleme zu vermeiden std::terminate() wird ansonsten aufgerufen nach case 1
+
+    unique_hotkey Numpad1(NULL, 1, 0, VK_NUMPAD1);
+    unique_hotkey Numpad2(NULL, 1, 0, VK_NUMPAD2);
     ClientSide ygo(game);
     automate bot(ygo);
-    visualSide visual(ygo);
-    ygo_bot ygobot(bot, visual, ygo);
+    visualSide visual(ygo, keep_running);
+    ygo_bot ygobot(bot, visual, ygo, keep_running);
+
+    MSG msg;
 
     auto deck_wish = ask_question(argv, argc);
     if(!(deck_wish)){
         return 1;
     }
-    ygobot.deck_load(deck_wish.value());
-    bot.click(ygo.get_UI_coordinates(UiTarget::deckname));
-    bot.type_string_alternative("Maher ist King!");
-    bot.click(ygo.get_UI_coordinates(UiTarget::savedeck));
+    while(GetMessage(&msg, NULL, 0, 0)){
+        if (msg.message == WM_HOTKEY){
+            switch(msg.wParam){
+                case 1:
+                    second_thread = std::thread([&](){
+                        ygobot.deck_load(deck_wish.value());
+                        bot.click(ygo.get_UI_coordinates(UiTarget::deckname));
+                        bot.type_string_alternative("Maher ist King!");
+                        bot.click(ygo.get_UI_coordinates(UiTarget::savedeck));
+                    });
+                    break;
+
+                case 2:
+                    keep_running = false;
+                    PostQuitMessage(0);
+                    break;
+
+            }
+        }
+    }
+    if(second_thread.joinable()){
+        second_thread.join();
+    }
 }
 
 
@@ -609,4 +698,4 @@ std::optional<int> ask_question(char* argv[], int argc){
     }
 
     return deck_wish;
-}
+};
