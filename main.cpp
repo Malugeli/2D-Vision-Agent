@@ -600,6 +600,12 @@ struct ygo_bot{
                     std::this_thread::sleep_for(std::chrono::milliseconds(300));
                 }
         }
+        if(!keep_running){
+            return false;
+        }
+        bot.click(ygo.get_UI_coordinates(UiTarget::deckname));
+        bot.type_string_alternative("Maher ist King!");
+        bot.click(ygo.get_UI_coordinates(UiTarget::savedeck));
         return true;
         }
 };
@@ -621,8 +627,7 @@ int main(int argc, char* argv[])
     std::atomic<bool> keep_running = true; //liegt auf Stack vom Mainthread
     std::thread second_thread{}; //Callen wir um Scopeprobleme zu vermeiden std::terminate() wird ansonsten aufgerufen nach case 1
 
-    unique_hotkey Numpad1(NULL, 1, 0, VK_NUMPAD1);
-    unique_hotkey Numpad2(NULL, 1, 0, VK_NUMPAD2);
+    unique_hotkey Numpad0(NULL, 1, 0, VK_NUMPAD0);
     ClientSide ygo(game);
     automate bot(ygo);
     visualSide visual(ygo, keep_running);
@@ -634,30 +639,23 @@ int main(int argc, char* argv[])
     if(!(deck_wish)){
         return 1;
     }
+    second_thread = std::thread([&](){
+        std::println("Progam starting. Press Numpad 0 to quit!");
+        ygobot.deck_load(*deck_wish);
+        if(second_thread.joinable()){
+            second_thread.join();
+        }
+        return 0;
+    });
     while(GetMessage(&msg, NULL, 0, 0)){
         if (msg.message == WM_HOTKEY){
-            switch(msg.wParam){
-                case 1:
-                    second_thread = std::thread([&](){
-                        ygobot.deck_load(deck_wish.value());
-                        bot.click(ygo.get_UI_coordinates(UiTarget::deckname));
-                        bot.type_string_alternative("Maher ist King!");
-                        bot.click(ygo.get_UI_coordinates(UiTarget::savedeck));
-                    });
-                    break;
-
-                case 2:
-                    keep_running = false;
-                    PostQuitMessage(0);
-                    break;
-
+                std::println("Program quitting..");
+                keep_running = false;
+                PostQuitMessage(0);
+                break;
             }
         }
     }
-    if(second_thread.joinable()){
-        second_thread.join();
-    }
-}
 
 
 std::optional<int> ask_question(char* argv[], int argc){
