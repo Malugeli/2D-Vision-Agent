@@ -64,7 +64,7 @@ constexpr auto vanquish = std::to_array<deck_recipe>({
     {"Borger", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/K9 Vanquish Soul/Borger.png", 1},
     {"Valius", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/K9 Vanquish Soul/Valius.png", 1},
     {"Reinforcement", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/K9 Vanquish Soul/Rota.png", 1},
-    {"Talents", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/K9 Vanquish Soul/Talents.png", 1},
+    {"Talent", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/K9 Vanquish Soul/Talents.png", 1},
     {"Stake your Soul", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/K9 Vanquish Soul/Stake.png", 2},
     {"Vanquish Soul, Start!", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/K9 Vanquish Soul/Start.png", 1},
     {"Case for", "C:/Users/aluge/Desktop/Computer Science/Projekte/YgoBotMaher/Pics/K9 Vanquish Soul/Case for.png", 3},
