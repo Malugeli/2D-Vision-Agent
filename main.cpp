@@ -214,13 +214,6 @@ struct visualSide{
                 ClientToScreen(visualClient.game, &window_start);
                 window_start.x = window_start.x - info.rcMonitor.left;
                 gameRect = cv::Rect(window_start.x, window_start.y, width, height);
-
-                std::println("Width: {}, Height {}", width, height);
-                std::println("Gamerect.x: {}", gameRect.x);
-                std::println("Gamerect.y: {}", gameRect.y);
-                std::println("Gamerect.width: {}", gameRect.width);
-                std::println("Gamerect.height: {}", gameRect.height);
-                
         
                 //Deck Rect
                 POINT deck_start = visualClient.get_UI_coordinates(UiTarget::deck_Begin);
@@ -255,7 +248,7 @@ struct visualSide{
             return std::nullopt;
         };
 
-        //nutze ich letztendlich nicht da die gegebenen Koordinaten nicht mehr absolut zum ClientRect sind sondern zum ROI.
+        //nutze ich letztendlich nicht da die gegebenen Koordinaten nicht mehr absolut zum ClientRect sind sondern zum ROI./* s */
         switch(roi)
         {
             case ROI::all:
@@ -279,9 +272,9 @@ struct visualSide{
         if (maxVal > 0.7) 
         {
             POINT pp;
-            pp.x = gameRect.x + (p.x + (card.cols / 2)); // Greift die Karte direkt in der Mitte. Sehr sus für Anti-Cheat
-            pp.y = gameRect.y + (p.y + (card.rows / 2));
-            std::println("Found at {}", pp.x);
+            pp.x = p.x + (card.cols / 2); // Greift die Karte direkt in der Mitte. Sehr sus für Anti-Cheat
+            pp.y = p.y + (card.rows / 2);
+            ClientToScreen(visualClient.game, &pp);
             return pp;
         }
 
@@ -515,7 +508,7 @@ struct ygo_bot{
         cv::resize(karte.picture, editor, cv::Size(), editfactor, editfactor, cv::INTER_CUBIC); // CUBIC um zu vergrößern AREA zu verkleinern
         if(auto card = visual.findCard(editor); card && keep_running) // Interessant wie Compiler auto benutzt. Ohne initialisierung haut es uns um die Ohren
         {
-            bot.drag(card.value(), ygo.get_UI_coordinates(UiTarget::in));
+            bot.drag(*card, ygo.get_UI_coordinates(UiTarget::in));
             return true;
         }
         else
@@ -547,7 +540,8 @@ struct ygo_bot{
                     }
 
                     GetCursorPos(&p);
-                    if(p.y >= border.y){
+                    if(p.y >= border.y)
+                    {
                         std::println("Karte nicht gefunden!");
                         return false;
                     }
@@ -557,7 +551,8 @@ struct ygo_bot{
                         return true;
                     }
                     else{
-                        if(!keep_running){
+                        if(!keep_running)
+                        {
                             return std::nullopt;
                         }
                         POINT pp = p;
