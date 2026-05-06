@@ -1,12 +1,3 @@
-/*
-TODO:
-
-1. Die UI Bewegung funktioniert wieder. Er findet die Karte, greift aber falsch. Die Koordinaten die OpenCV uns übergibt sind nicht richtig.. sie sind nicht auf dem VirtualScreen Format. 
-2. Die Unique_Hotkey geht nicht während einer Aufgabe. Er ignoriert es bis die Aufgabe erledigt ist. Ich muss etwas machen damit er während ich arbeite PostQuitMessage macht.
-3. Die Daten sind kinda fucked up. Er findet die Karte wieder aber er trifft sie nicht und tut sie dadurch auch nicht ins Deck. Wir arbeiten mit veralteten Daten sicherlich.
-
-*/
-
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -248,7 +239,7 @@ struct visualSide{
             return std::nullopt;
         };
 
-        //nutze ich letztendlich nicht da die gegebenen Koordinaten nicht mehr absolut zum ClientRect sind sondern zum ROI./* s */
+        //nutze ich letztendlich nicht da die gegebenen Koordinaten nicht mehr absolut zum ClientRect sind sondern zum ROI
         switch(roi)
         {
             case ROI::all:
