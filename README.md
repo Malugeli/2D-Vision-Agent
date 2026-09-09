@@ -1,65 +1,74 @@
-# Generic 2D Vision Agent Engine
+# YgoDeckBuilder
 
-## 📖 Projektphilosophie: Modulare Architektur (Separation of Concerns)
-Obwohl dieses Projekt primär anhand des Deckbaus in *Yu-Gi-Oh! Master Duel* demonstriert wird, ist das System im Kern ein **generischer, anwendungsunabhängiger 2D-Vision-Agent**. 
+Windows-Anwendung zum automatisierten Deckbau in Yu-Gi-Oh! Master Duel.
+Sie erkennt Karten mit OpenCV in einer DXGI-Bildschirmaufnahme und bedient
+den Deckeditor über Windows-Maus- und Tastatureingaben.
 
-Das Spiel dient hierbei lediglich als hochkomplexe Testumgebung (Stresstest), da es dynamische Fenstergrößen, unzählige kleine *Regions of Interest (ROI)* und sich ständig ändernde UI-Zustände bietet. Die Architektur ist strikt entkoppelt:
+## Aufbau
 
-* **Die Core-Engine (`visualSide` & `automate`):** Ist völlig blind für den spezifischen Use-Case. Sie kümmert sich ausschließlich um performante Hardware-Frame-Erfassung (DXGI), Mustererkennung (OpenCV) und menschlich emulierte Maus-/Tastatureingaben auf OS-Ebene.
-* **Die Logik-Schicht (`ygo_bot`):** Nutzt lediglich die API der Core-Engine. Diese Klasse kann mit minimalem Aufwand durch eine völlig andere Logik (z. B. für andere Spiele, Software-Testing oder Desktop-Automatisierung) ausgetauscht werden, indem man ihr lediglich neue Bildpfade und UI-Koordinaten übergibt.
+Alle Anwendungsquellen und Header liegen in `src/`. Tests liegen separat in
+`tests/`, Bildvorlagen in `Pics/` und die CMake-Konfiguration im Projektwurzelverzeichnis.
 
-## ✨ Technische Highlights
-* **Zero-Overhead Screen Capture:** Nutzt die `IDXGIOutputDuplication` API, um Frames direkt von der Grafikkarte abzugreifen, ohne den Umweg über langsame GDI-Calls.
-* **Modern C++23:** Idiomatische Nutzung aktueller Sprachfeatures wie `std::span`, `<print>`, `std::to_underlying` und `std::optional` für sauberen, typsicheren und wartbaren Code.
-* **Speicher- & Ressourcensicherheit:** Konsequenter Einsatz der Windows Implementation Libraries (WIL). Nutzung von `wil::com_ptr` für COM-Objekte und `wil::scope_exit` für garantierte Aufräumarbeiten im Fehlerfall (RAII).
-* **Computer Vision:** Bilderkennung via `cv::matchTemplate` (OpenCV), um Karten dynamisch zu lokalisieren, unabhängig von der Fensterposition des Spiels.
+| Dateien | Verantwortung |
+| --- | --- |
+| `main.cpp` | Einstiegspunkt |
+| `application.hpp/.cpp` | Deckauswahl, Zusammensetzen der Komponenten, Worker und Abbruch |
+| `client_window.hpp/.cpp` | Fensterabmessungen und Bildschirmkoordinaten |
+| `screen_capture.hpp/.cpp` | DirectX-Aufnahme und visuelle Suche |
+| `input_controller.hpp/.cpp` | Mausbewegungen, Drag-and-drop und Tastatureingaben |
+| `deck_builder.hpp/.cpp` | Kartensuche, Einfügen und Speichern des Decks |
+| `deck_catalog.hpp/.cpp` | Deckrezepte mit relativen Bildpfaden |
+| `deck_selection.hpp/.cpp` | Prüfung der Deckauswahl |
+| `ui_layout.hpp` | Relative Positionen der Bedienelemente |
+| `hotkey.hpp/.cpp` | Registrierung und automatische Freigabe des Abbruch-Hotkeys |
 
-## 📐 Die Mathematik der Emulation (Anti-Heuristik)
-Um automatische Verhaltensanalysen (Anti-Cheat-Heuristiken) zu umgehen, teleportiert der Agent den Cursor nicht, sondern berechnet physikalisch plausible Pfade in Echtzeit:
-* **Dynamische Bézierkurven:** Die Funktion `mouse_move` generiert kubische Bézierkurven. Zwei dynamische Kontrollpunkte ("Magneten") ziehen die Maus auf ihrem Weg zum Ziel leicht aus der perfekten Geraden.
-* **Gaußsche Unschärfe:** Der Abstand dieser Kontrollpunkte wird durch eine Normalverteilung (`std::normal_distribution`) bestimmt. Kein Mauspfad gleicht exakt dem anderen. Auch die Klick-Verzögerungen unterliegen einer Gauß-Verteilung.
-* **SIMD-Optimierung:** Die mathematischen Zwischenschritte der Kurve (`t`, `tt`, `uu`, `uuu` etc.) sind explizit so deklariert und strukturiert, dass der Compiler sie direkt in die CPU-Register laden und via SIMD-Instruktionen parallelisieren kann, was den Rechen-Overhead pro Frame minimiert.
+Der DeckBuilder verwendet Eingaben, Bilderkennung und Fensterkoordinaten.
+Die technischen Komponenten kennen die Deckrezepte nicht. UI-Ziele und
+Suchregionen sind weiterhin auf den Master-Duel-Deckeditor zugeschnitten.
+Neue Decks werden im Katalog ergänzt; die Auswahl wird in `deck_selection.cpp`
+und im Menü in `application.cpp` erweitert.
 
-## 🛠️ Architektur & Module
-Das System ist in klar abgegrenzte Strukturen unterteilt, um die Zuständigkeiten zu trennen:
-* **`ClientSide`**: Verwaltet die Interaktion mit dem Windows-API-Handle des Spiels. Normalisiert Bildschirmkoordinaten (ClientToScreen / VirtualScreen) für die präzise Nutzung der `SendInput`-API über mehrere Monitore hinweg.
-* **`visualSide`**: Das Herzstück der Bildverarbeitung. Initialisiert D3D11-Devices, greift asynchron den aktuellen Monitor-Frame via DXGI ab, mappt den VRAM in den CPU-Speicher und konvertiert die BGRA-Rohdaten in OpenCV-lesbare BGR-Matrizen (`cv::Mat`). Schneidet Regions of Interest (ROI) dynamisch aus.
-* **`automate`**: Kapselt die Tastatur- und Mauseingaben. Übersetzt Strings in Scancodes und feuert diese mit realistischen, asynchronen Verzögerungen ab.
-* **`ygo_bot`**: Die austauschbare Geschäftslogik. Nimmt Deck-Rezepte entgegen, sucht die Karten visuell (inkl. Auto-Scrolling und Fallback-Texteingabe) und interagiert mit dem UI.
+## Bauen unter Windows
 
-## 🚀 Installation & Build-System
+Benötigt werden CMake 3.28+, ein C++23-fähiger MSVC-Compiler mit
+`std::print`-Unterstützung, OpenCV und WIL. Die Bibliotheken können beispielsweise
+über eine bestehende vcpkg-Installation bereitgestellt werden:
 
-### Systemvoraussetzungen & Compiler
-* **Betriebssystem:** Windows 10/11 (aufgrund der tiefen Windows API und DXGI Integration)
-* **Compiler:** **MSVC** (Visual Studio 2022 Build Tools) oder **Clang** (`clang-cl`). 
-  * *Wichtige architektonische Notiz:* Aufgrund der intensiven Nutzung von modernen COM-Schnittstellen und den Windows Implementation Libraries (WIL) wird GCC (MinGW) für dieses Projekt bewusst nicht unterstützt.
-* **Build-Toolchain:** CMake (Version 3.20+) in Kombination mit `vcpkg` für das Dependency-Management.
+```powershell
+vcpkg install opencv4:x64-windows wil:x64-windows
+cmake -S . -B build-windows -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build build-windows --config Release
+ctest --test-dir build-windows -C Release --output-on-failure
+```
 
-### Verwendete Bibliotheken
-* **OpenCV 4.x** (Bildverarbeitung)
-* **WIL** (Windows Implementation Libraries für sicheres RAII-Handling von Windows-APIs)
+CMake kopiert `Pics` neben die erzeugte EXE. Die Anwendung löst Bildpfade relativ
+zur EXE auf; das aktuelle Arbeitsverzeichnis spielt keine Rolle.
 
-### CMake Setup (Beispiel)
-Das Projekt lässt sich am einfachsten mit einer Standard-CMakeLists kompilieren. Hier ein Auszug der Struktur, um die saubere Linkage der Bibliotheken zu zeigen:
+## Benutzung
 
-```cmake
-cmake_minimum_required(VERSION 3.20)
-project(YgoBotMaher CXX)
+Master Duel öffnen und den Deckeditor vorbereiten. Mit
+`YgoDeckBuilder.exe 1` wird Dracotail gewählt, mit `2` K9 Vanquish Soul.
+Ohne Argument fragt das Programm nach. Numpad 0 bricht den Deckbau ab.
+Eine gerade laufende Eingabe wird noch abgeschlossen. Nach Erfolg oder Fehler
+endet das Programm automatisch; bei Fehler oder Abbruch lautet der Exitcode 1.
 
-# C++23 Standard erzwingen
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+Die Referenzbilder stammen aus einer Fensterhöhe von 2160 Pixeln und werden
+entsprechend skaliert. Spielsprache, UI-Layout und Suchnamen müssen zu den
+Vorlagen passen. Der vorhandene Deckname „Maher ist King!“ bleibt erhalten.
 
-# Abhängigkeiten via vcpkg
-find_package(OpenCV REQUIRED)
-find_package(wil CONFIG REQUIRED)
+## Tests und Grenzen
 
-add_executable(YgoBotMaher main.cpp)
+Deckauswahl, Rezeptdaten und die Existenz aller referenzierten Bilder lassen
+sich auch unter Linux prüfen:
 
-# Linken der Bibliotheken und Windows-System-Libs
-target_link_libraries(YgoBotMaher PRIVATE 
-    ${OpenCV_LIBS}
-    wil::wil
-    d3d11
-    dxgi
-)
+```sh
+cmake -S . -B build-tests -DBUILD_TESTING=ON
+cmake --build build-tests
+ctest --test-dir build-tests --output-on-failure
+```
+
+Die Desktop-Anwendung wird nur unter Windows gebaut. Für die vollständige
+Prüfung sind dort außerdem ein Start im Deckeditor, beide Deckrezepte, der
+Numpad-0-Abbruch sowie Fensterbewegungen und verschiedene Monitorauflösungen
+zu testen. Monitore an anderen Grafikadaptern, gedrehte Displays und eine
+Wiederherstellung nach DXGI-Verbindungsverlust werden derzeit nicht unterstützt.
