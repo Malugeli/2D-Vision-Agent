@@ -1,65 +1,149 @@
-# YgoDeckBuilder
+# 2D Vision Agent
 
-Windows-Anwendung zum automatisierten Deckbau in Yu-Gi-Oh! Master Duel.
-Sie erkennt Karten mit OpenCV in einer DXGI-Bildschirmaufnahme und bedient
-den Deckeditor über Windows-Maus- und Tastatureingaben.
+`2D Vision Agent` is a native C++ automation prototype that observes a graphical
+user interface through the screen, recognizes visual targets, and executes
+input actions in response.
 
-## Aufbau
+The core idea is deliberately simple:
 
-Alle Anwendungsquellen und Header liegen in `src/`. Tests liegen separat in
-`tests/`, Bildvorlagen in `Pics/` und die CMake-Konfiguration im Projektwurzelverzeichnis.
+> Capture pixels → find a known visual pattern → translate it into a UI action.
 
-| Dateien | Verantwortung |
+The current implementation combines Windows DXGI Desktop Duplication for low-
+overhead screen capture, OpenCV for image matching, and Win32 input injection
+for mouse and keyboard control. It is designed for deterministic, repeatable
+2D interfaces where the agent can work from visible pixels instead of private
+APIs or process memory.
+
+The project was stress-tested with a card-game interface backed by a catalog of
+more than 10,000 cards. That workload was chosen because it combines a large
+visual search space with repetitive, error-prone UI interaction.
+
+## What it does
+
+- Captures the monitor containing the target window through DXGI Output Duplication.
+- Converts captured frames into OpenCV matrices for analysis.
+- Restricts searches to configurable regions of interest instead of scanning the full frame.
+- Locates reference images with normalized template matching.
+- Translates detections into screen coordinates.
+- Moves the mouse along paced paths and performs clicks, drags, and keyboard input.
+- Runs the automation on a worker thread while the main thread handles cancellation and Windows messages.
+- Stops safely through a global hotkey and reports success, failure, or cancellation through its exit code.
+
+This repository currently contains a concrete reference integration rather than
+a general-purpose agent SDK. The capture, vision, input, and orchestration
+components are separated so that a different visual workflow can be built on
+top of the same foundation.
+
+## Architecture
+
+```text
+Target window
+     │
+     ▼
+DXGI Desktop Duplication ──► D3D11 staging texture ──► OpenCV frame
+                                                          │
+                                                          ▼
+                                                ROI template matching
+                                                          │
+                                                          ▼
+                                             Screen-space target position
+                                                          │
+                                                          ▼
+                                      Win32 mouse and keyboard input
+```
+
+The main execution loop is split into focused components:
+
+| Component | Responsibility |
 | --- | --- |
-| `main.cpp` | Einstiegspunkt |
-| `application.hpp/.cpp` | Deckauswahl, Zusammensetzen der Komponenten, Worker und Abbruch |
-| `client_window.hpp/.cpp` | Fensterabmessungen und Bildschirmkoordinaten |
-| `screen_capture.hpp/.cpp` | DirectX-Aufnahme und visuelle Suche |
-| `input_controller.hpp/.cpp` | Mausbewegungen, Drag-and-drop und Tastatureingaben |
-| `deck_builder.hpp/.cpp` | Kartensuche, Einfügen und Speichern des Decks |
-| `deck_catalog.hpp/.cpp` | Deckrezepte mit relativen Bildpfaden |
-| `deck_selection.hpp/.cpp` | Prüfung der Deckauswahl |
-| `ui_layout.hpp` | Relative Positionen der Bedienelemente |
-| `hotkey.hpp/.cpp` | Registrierung und automatische Freigabe des Abbruch-Hotkeys |
+| `ScreenCapture` | Acquires frames from the target monitor and searches regions with OpenCV. |
+| `ClientWindow` | Resolves window bounds, monitor offsets, DPI-aware coordinates, and UI anchors. |
+| `InputController` | Sends mouse movement, clicks, drags, and keyboard input through Win32. |
+| `DeckBuilder` | Implements the current reference workflow as a sequence of visual actions. |
+| `Hotkey` | Registers and releases the global cancellation hotkey. |
+| `application.cpp` | Validates input, locates the target window, starts the worker, and handles shutdown. |
+| `deck_catalog` / `deck_selection` | Stores and validates the current workflow profiles. |
 
-Der DeckBuilder verwendet Eingaben, Bilderkennung und Fensterkoordinaten.
-Die technischen Komponenten kennen die Deckrezepte nicht. UI-Ziele und
-Suchregionen sind weiterhin auf den Master-Duel-Deckeditor zugeschnitten.
-Neue Decks werden im Katalog ergänzt; die Auswahl wird in `deck_selection.cpp`
-und im Menü in `application.cpp` erweitert.
+## Requirements
 
-## Bauen unter Windows
+### Runtime and native build
 
-Benötigt werden CMake 3.28+, ein C++23-fähiger MSVC-Compiler mit
-`std::print`-Unterstützung, OpenCV und WIL. Die Bibliotheken können beispielsweise
-über eine bestehende vcpkg-Installation bereitgestellt werden:
+- Windows 10 or later
+- A Direct3D 11-capable graphics adapter
+- CMake 3.28 or newer
+- A C++23-capable MSVC toolchain (Visual Studio 2022 recommended)
+- vcpkg
+- OpenCV
+- Microsoft WIL (Windows Implementation Library)
+
+The application uses Windows-only APIs for screen capture, window discovery,
+global hotkeys, and input injection. The production executable is therefore
+only built on Windows.
+
+### Reference images
+
+The agent requires a `Pics/` directory containing the reference images used by
+the selected workflow. The image corpus is intentionally kept separate from
+the source repository and is not generated by the build. The post-build step
+copies `Pics/` next to the executable, and the application resolves image paths
+relative to the executable rather than the current working directory.
+
+## Build on Windows
+
+Clone the repository and open a PowerShell prompt at its root. The project
+contains a vcpkg manifest for its native dependencies.
 
 ```powershell
-vcpkg install opencv4:x64-windows wil:x64-windows
-cmake -S . -B build-windows -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+git clone https://github.com/Malugeli/2D-Vision-Agent.git
+Set-Location 2D-Vision-Agent
+
+# Replace this path with your local vcpkg installation.
+$VCPKG_ROOT = "C:\path\to\vcpkg"
+
+vcpkg install --triplet x64-windows
+
+cmake -S . -B build-windows -G "Visual Studio 17 2022" -A x64 `
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+
 cmake --build build-windows --config Release
 ctest --test-dir build-windows -C Release --output-on-failure
 ```
 
-CMake kopiert `Pics` neben die erzeugte EXE. Die Anwendung löst Bildpfade relativ
-zur EXE auf; das aktuelle Arbeitsverzeichnis spielt keine Rolle.
+If you use another generator, keep the same source directory, build directory,
+and vcpkg toolchain file. CMake builds the desktop agent on Windows and the
+portable data/test target on non-Windows systems.
 
-## Benutzung
+## Run the reference integration
 
-Master Duel öffnen und den Deckeditor vorbereiten. Mit
-`YgoDeckBuilder.exe 1` wird Dracotail gewählt, mit `2` K9 Vanquish Soul.
-Ohne Argument fragt das Programm nach. Numpad 0 bricht den Deckbau ab.
-Eine gerade laufende Eingabe wird noch abgeschlossen. Nach Erfolg oder Fehler
-endet das Programm automatisch; bei Fehler oder Abbruch lautet der Exitcode 1.
+Before starting the executable:
 
-Die Referenzbilder stammen aus einer Fensterhöhe von 2160 Pixeln und werden
-entsprechend skaliert. Spielsprache, UI-Layout und Suchnamen müssen zu den
-Vorlagen passen. Der vorhandene Deckname „Maher ist King!“ bleibt erhalten.
+1. Put the required reference-image set in `Pics/`.
+2. Open the target application and place it in the expected UI state.
+3. Make sure the target window is visible on a desktop monitor.
+4. Start the generated executable from the `Release` build directory.
 
-## Tests und Grenzen
+The current reference integration accepts a numeric workflow selection as an
+argument. Without an argument, it asks for the selection interactively:
 
-Deckauswahl, Rezeptdaten und die Existenz aller referenzierten Bilder lassen
-sich auch unter Linux prüfen:
+```powershell
+$agentExecutable = Get-ChildItem .\build-windows\Release -Filter *.exe | Select-Object -First 1
+& $agentExecutable.FullName 1
+```
+
+The current profiles are defined in `src/deck_catalog.cpp`. If the Release
+directory contains more than one executable, replace the discovery command
+with the exact path to the agent executable.
+
+Press **Numpad 0** to request cancellation. The agent finishes the current
+input operation, then stops. Exit code `0` indicates success; exit code `1`
+indicates invalid input, a missing target window, a failed operation, or
+cancellation.
+
+## Tests
+
+The test target validates profile selection, malformed input, recipe data, and
+the presence of referenced image files. It does not require the Windows
+desktop runtime and can be built independently:
 
 ```sh
 cmake -S . -B build-tests -DBUILD_TESTING=ON
@@ -67,8 +151,49 @@ cmake --build build-tests
 ctest --test-dir build-tests --output-on-failure
 ```
 
-Die Desktop-Anwendung wird nur unter Windows gebaut. Für die vollständige
-Prüfung sind dort außerdem ein Start im Deckeditor, beide Deckrezepte, der
-Numpad-0-Abbruch sowie Fensterbewegungen und verschiedene Monitorauflösungen
-zu testen. Monitore an anderen Grafikadaptern, gedrehte Displays und eine
-Wiederherstellung nach DXGI-Verbindungsverlust werden derzeit nicht unterstützt.
+The full desktop workflow still requires manual validation on Windows. In
+particular, verify the target window, reference images, UI scale, monitor
+placement, input permissions, cancellation behavior, and recovery from display
+changes.
+
+## Configuration and extension points
+
+The current UI workflow is intentionally easy to inspect and adapt:
+
+- `src/ui_layout.hpp` contains normalized UI anchor coordinates.
+- `src/deck_catalog.cpp` contains the current workflow profiles and reference-image paths.
+- `src/screen_capture.cpp` contains capture, monitor selection, ROI calculation, and matching.
+- `src/input_controller.cpp` contains mouse and keyboard behavior.
+- `src/deck_builder.cpp` contains the high-level visual workflow.
+- `Pics/` contains the runtime reference images supplied for a workflow.
+
+To adapt the project to a different interface, replace the profile data and UI
+anchors first. If the new interface needs different recognition logic, extend
+`ScreenCapture` while keeping the input and orchestration layers independent.
+
+## Important limitations
+
+- This is template matching, not an object-detection or OCR model. Reference images must match the rendered UI closely enough to pass the configured threshold.
+- UI anchors are normalized to the target window, but changes in layout, theme, language, scaling, or rendering can still invalidate them.
+- The current target-window lookup and workflow are tailored to the included reference integration.
+- The current capture path selects the monitor containing the target window and expects a stable desktop-output configuration.
+- DXGI output changes, monitor reconfiguration, rotated displays, and unusual multi-adapter setups may require additional handling.
+- The agent controls the active desktop through synthetic input. It should only be used with software and accounts that you are authorized to automate.
+- The `Pics/` image corpus is external to the source repository; without it, the executable cannot recognize the reference targets.
+
+## Project status
+
+The project is an experimental engineering prototype focused on reliable 2D
+visual interaction. The separation between capture, recognition, input, and
+workflow logic is stable enough for further integrations, while the current
+UI-specific coordinates and profile model are still evolving.
+
+Contributions that improve portability, diagnostics, capture recovery, matching
+robustness, testability, or workflow configuration are welcome. Please include
+the target platform, display setup, input conditions, and a reproducible example
+when reporting an issue.
+
+## License
+
+No open-source license has been declared yet. Until one is added to this
+repository, all rights remain with the copyright holder.
